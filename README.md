@@ -180,6 +180,29 @@ Der E2E-Test prüft, dass:
 - alle State-Schritte abgeschlossen sind;
 - der Event-Log korrekt bei `01` beginnt.
 
+## Zwei sinnvolle Einstiege: dieses Repo oder CopilotKit
+
+Es gibt zwei unterschiedliche „einfachste“ Wege – abhängig davon, was du lernen möchtest:
+
+| Ziel | Passender Einstieg |
+|---|---|
+| Das AG-UI-Protokoll, SSE und einzelne Events wirklich verstehen | **Dieses Mini-Dojo** mit `@ag-ui/client`, `@ag-ui/core` und `@ag-ui/encoder` |
+| Möglichst schnell eine produktnahe Agenten-App mit fertigem Chat bauen | **CopilotKit/Next.js** mit `@copilotkit/react-core` und `@copilotkit/runtime` |
+
+CopilotKit kapselt AG-UI und bringt fertige React-Komponenten, Runtime und APIs wie `useFrontendTool` mit. Das spart Code, verbirgt aber einen Teil des Protokollflusses, den dieses Repo bewusst sichtbar macht. Ein sinnvoller Lernpfad ist daher:
+
+1. dieses Repo starten und Eventfluss nachvollziehen;
+2. im offiziellen Dojo die Features vergleichen;
+3. anschließend eine CopilotKit-Anwendung scaffolden und einen echten Agenten anbinden.
+
+Der offizielle Scaffold dafür ist:
+
+```bash
+npx create-ag-ui-app@latest
+```
+
+Dort kannst du **CopilotKit/Next.js** wählen. Für einen echten Built-in Agent wird anschließend ein Modellprovider beziehungsweise API-Key benötigt.
+
 ## Vom Mini-Dojo zum offiziellen Dojo
 
 Der offizielle [AG-UI Dojo](https://dojo.ag-ui.com/) zeigt dieselben Konzepte für viele Agenten-Frameworks und zusätzliche Fähigkeiten. Dieses Repository ist absichtlich kleiner, damit der komplette Datenfluss in wenigen Dateien nachvollziehbar bleibt.
