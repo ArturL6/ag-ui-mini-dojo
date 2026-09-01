@@ -1,5 +1,12 @@
 node_modules/
+.next/
 dist/
 .vite/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.env
+*.pyc
 *.log
 .DS_Store
