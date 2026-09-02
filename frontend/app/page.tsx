@@ -18,6 +18,16 @@ const pipeline = [
   ["6", "Subscriber", "UI + State"],
 ];
 
+const langGraphPipeline = [
+  ["1", "Browser", "RunAgentInput"],
+  ["2", "FastAPI", "separater Endpoint"],
+  ["3", "LangGraph", "Graph oder Functional API"],
+  ["4", "Runtime", "updates / custom / interrupt"],
+  ["5", "Translator", "LangGraph → AG-UI"],
+  ["6", "EventEncoder", "SSE Frames"],
+  ["7", "Subscriber", "UI + State"],
+];
+
 function eventTone(type: string) {
   if (type.startsWith("RUN_")) return "lifecycle";
   if (type.startsWith("TEXT_")) return "text";
@@ -52,8 +62,14 @@ export default function LearningLab() {
     () => events.find((entry) => entry.id === selectedId) ?? events.at(-1),
     [events, selectedId],
   );
-  const explanation = selected ? explainEvent(selected.event.type) : null;
+  const explanation = selected
+    ? explainEvent(
+        selected.event.type,
+        lesson.id.startsWith("langgraph") ? lesson.source : undefined,
+      )
+    : null;
   const seenTypes = new Set(events.map(({ event }) => String(event.type)));
+  const activePipeline = lesson.id.startsWith("langgraph") ? langGraphPipeline : pipeline;
 
   function chooseLesson(next: Lesson) {
     setLesson(next);
@@ -123,9 +139,11 @@ export default function LearningLab() {
     setStatus("running");
 
     const agent = new HttpAgent({
-      url: `/api/agent?scenario=${lesson.id}&delay_ms=${delayMs}`,
+      url: lesson.endpoint
+        ? `${lesson.endpoint}?delay_ms=${delayMs}`
+        : `/api/agent?scenario=${lesson.id}&delay_ms=${delayMs}`,
       agentId: "learning-agent",
-      threadId: `lesson-${lesson.id}`,
+      threadId: `lesson-${lesson.id}-${crypto.randomUUID()}`,
     });
     agent.messages = [
       { id: crypto.randomUUID(), role: "user", content: prompt.trim() },
@@ -184,20 +202,20 @@ export default function LearningLab() {
             >
               <span>{item.number}</span>
               <div><strong>{item.title}</strong><small>{item.subtitle}</small></div>
-              {item.optional && <em>KEY</em>}
+              {item.badge && <em>{item.badge}</em>}
             </button>
           ))}
         </nav>
         <div className="stack-card">
           <small>LIVE STACK</small>
-          <span>Next.js 16</span><span>FastAPI</span><span>@ag-ui/client</span><span>Docker Compose</span>
+          <span>Next.js 16</span><span>FastAPI</span><span>@ag-ui/client</span><span>LangGraph Graph + Functional API</span><span>Docker Compose</span>
         </div>
       </aside>
 
       <div className="workspace">
         <header className="topbar">
           <div>
-            <span className="kicker">LEKTION {lesson.number} / 07</span>
+            <span className="kicker">LEKTION {lesson.number} / {String(lessons.length).padStart(2, "0")}</span>
             <h1>{lesson.title}</h1>
             <p>{lesson.goal}</p>
           </div>
@@ -210,12 +228,12 @@ export default function LearningLab() {
         </header>
 
         <section className="architecture" aria-label="Architekturfluss">
-          {pipeline.map(([number, title, detail], index) => (
+          {activePipeline.map(([number, title, detail], index) => (
             <div className="pipeline-wrap" key={title}>
               <div className="pipeline-node">
                 <span>{number}</span><strong>{title}</strong><small>{detail}</small>
               </div>
-              {index < pipeline.length - 1 && <b>→</b>}
+              {index < activePipeline.length - 1 && <b>→</b>}
             </div>
           ))}
         </section>
@@ -248,7 +266,7 @@ export default function LearningLab() {
             {interrupt && (
               <div className="approval" data-testid="approval-card">
                 <small>HUMAN IN THE LOOP</small><h3>Agent wartet auf Freigabe</h3><p>{interrupt.message}</p>
-                <div><button onClick={() => void resumeInterrupt(false)}>Ablehnen</button><button className="approve" onClick={() => void resumeInterrupt(true)} data-testid="approve">Freigeben & fortsetzen</button></div>
+                <div><button onClick={() => void resumeInterrupt(false)} data-testid="reject">Ablehnen</button><button className="approve" onClick={() => void resumeInterrupt(true)} data-testid="approve">Freigeben & fortsetzen</button></div>
               </div>
             )}
             <div className="answer-card">

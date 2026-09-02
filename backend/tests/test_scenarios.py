@@ -5,7 +5,10 @@ from collections.abc import AsyncIterator
 import pytest
 from ag_ui.core import EventType, RunAgentInput
 
-from app.scenarios import run_scenario
+from app.langgraph_flow import build_learning_graph, run_langgraph_flow
+from app.langgraph_functional_flow import functional_workflow, run_functional_flow
+from app.main import app
+from app.scenarios import SCENARIOS, run_scenario
 
 
 def input_for(*, resume=None) -> RunAgentInput:
@@ -70,3 +73,80 @@ async def test_llm_without_key_is_visible_protocol_error(monkeypatch):
     events = await collect(run_scenario("llm", input_for(), delay_ms=0))
     assert events[-1].type == EventType.RUN_ERROR
     assert events[-1].code == "MISSING_API_KEY"
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected_nodes"),
+    [
+        ("Erzeuge eine Checkliste mit einem Tool", ["understand", "learning_tool", "respond"]),
+        ("Erkläre mir den Flow direkt", ["understand", "respond"]),
+    ],
+)
+async def test_langgraph_uses_real_conditional_node_routes(prompt, expected_nodes):
+    result = await build_learning_graph().ainvoke({"prompt": prompt})
+
+    assert result["visited_nodes"] == expected_nodes
+    assert result["answer"]
+
+
+async def test_langgraph_flow_maps_node_updates_to_ag_ui_events():
+    events = await collect(run_langgraph_flow(input_for(), delay_ms=0))
+    event_types = [event.type for event in events]
+    step_names = [event.step_name for event in events if event.type == EventType.STEP_STARTED]
+
+    assert event_types[0] == EventType.RUN_STARTED
+    assert EventType.STATE_SNAPSHOT in event_types
+    assert EventType.STATE_DELTA in event_types
+    assert EventType.TEXT_MESSAGE_CONTENT in event_types
+    assert event_types[-1] == EventType.RUN_FINISHED
+    assert step_names == ["understand", "learning_tool", "respond"]
+
+
+def test_langgraph_has_an_endpoint_separate_from_existing_scenarios():
+    route_paths = {getattr(route, "path", None) for route in app.routes}
+    assert "langgraph" not in SCENARIOS
+    assert "/agent" in route_paths
+    assert "/agent/langgraph" in route_paths
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected_tasks"),
+    [
+        (
+            "Erzeuge eine Checkliste mit einem Tool",
+            ["understand_task", "learning_tool_task", "respond_task"],
+        ),
+        ("Erkläre mir den Flow direkt", ["understand_task", "respond_task"]),
+    ],
+)
+async def test_functional_api_executes_real_tasks_and_python_control_flow(prompt, expected_tasks):
+    result = await functional_workflow.ainvoke({"prompt": prompt})
+
+    assert result["task_order"] == expected_tasks
+    assert result["answer"]
+
+
+async def test_functional_runtime_chunks_are_translated_to_ag_ui_events():
+    events = await collect(run_functional_flow(input_for(), delay_ms=0))
+    event_types = [event.type for event in events]
+    step_names = [event.step_name for event in events if event.type == EventType.STEP_STARTED]
+    snapshots = [event for event in events if event.type == EventType.STATE_SNAPSHOT]
+    deltas = [event for event in events if event.type == EventType.STATE_DELTA]
+
+    assert event_types[0] == EventType.RUN_STARTED
+    assert snapshots[0].snapshot["translation"] == "langgraph-runtime-to-ag-ui"
+    assert snapshots[0].snapshot["translator"] == "transparent-custom-v1"
+    assert step_names == ["understand_task", "learning_tool_task", "respond_task"]
+    assert any(
+        operation.get("path") == "/lastLangGraphChunk"
+        and operation["value"]["streamMode"] == "custom"
+        for event in deltas
+        for operation in event.delta
+    )
+    assert EventType.TEXT_MESSAGE_CONTENT in event_types
+    assert event_types[-1] == EventType.RUN_FINISHED
+
+
+def test_functional_api_has_its_own_endpoint():
+    route_paths = {getattr(route, "path", None) for route in app.routes}
+    assert "/agent/langgraph-functional" in route_paths

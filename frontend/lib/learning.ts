@@ -9,6 +9,8 @@ export type Lesson = {
   source: string;
   keyIdea: string;
   optional?: boolean;
+  endpoint?: string;
+  badge?: string;
 };
 
 export const lessons: Lesson[] = [
@@ -89,6 +91,123 @@ export const lessons: Lesson[] = [
     source: "backend/app/scenarios.py → llm_scenario()",
     keyIdea: "Der Provider ist austauschbar; die Oberfläche konsumiert weiterhin AG-UI-Events.",
     optional: true,
+    badge: "KEY",
+  },
+  {
+    id: "langgraph",
+    number: "08",
+    title: "LangGraph Flow",
+    subtitle: "Echte Nodes und bedingte Kanten, separat adaptiert",
+    goal: "LangGraph-State und Node-Updates unabhängig erzeugen und als AG-UI-Events beobachten.",
+    prompt: "Erzeuge eine Checkliste mit einem Tool und zeige mir den Flow",
+    expectedEvents: [
+      "RUN_STARTED",
+      "STATE_SNAPSHOT",
+      "STEP_STARTED",
+      "STATE_DELTA",
+      "TEXT_MESSAGE_CONTENT",
+      "RUN_FINISHED",
+    ],
+    source: "backend/app/langgraph_flow.py → run_langgraph_flow()",
+    keyIdea: "LangGraph orchestriert den Flow; ein separater Adapter übersetzt Node-Updates in AG-UI.",
+    endpoint: "/api/langgraph",
+    badge: "GRAPH",
+  },
+  {
+    id: "langgraph-functional",
+    number: "09",
+    title: "LangGraph Functional API",
+    subtitle: "@entrypoint, @task und normale Python-Kontrolllogik",
+    goal: "Echte Functional-API-Task-Streams empfangen und transparent in AG-UI übersetzen.",
+    prompt: "Erzeuge eine Checkliste mit einem Tool über die Functional API",
+    expectedEvents: [
+      "RUN_STARTED",
+      "STATE_SNAPSHOT",
+      "STEP_STARTED",
+      "STATE_DELTA",
+      "TEXT_MESSAGE_CONTENT",
+      "RUN_FINISHED",
+    ],
+    source: "backend/app/langgraph_functional_flow.py → run_functional_flow()",
+    keyIdea: "Die AG-UI-Events werden aus echten custom/updates-Chunks des Functional-API-Runtimes erzeugt; die Zuordnung selbst ist unser Adapter.",
+    endpoint: "/api/langgraph-functional",
+    badge: "FUNC",
+  },
+  {
+    id: "langgraph-graph-tools",
+    number: "10",
+    title: "Graph API Tool Execution",
+    subtitle: "Tool Call, echte Python-Ausführung und Resultat",
+    goal: "Eine wirkliche Tool-Funktion innerhalb eines StateGraph-Laufs ausführen und übersetzen.",
+    prompt: "Zähle die Wörter mit einem Tool",
+    expectedEvents: [
+      "RUN_STARTED",
+      "TOOL_CALL_START",
+      "TOOL_CALL_ARGS",
+      "TOOL_CALL_END",
+      "TOOL_CALL_RESULT",
+      "RUN_FINISHED",
+    ],
+    source: "backend/app/langgraph_advanced_flows.py → run_graph_tool_flow()",
+    keyIdea: "Das Tool-Ergebnis stammt aus einer echten Python-Funktion; der Translator bildet die Runtime-Signale auf AG-UI ab.",
+    endpoint: "/api/langgraph-graph-tools",
+    badge: "G·TOOL",
+  },
+  {
+    id: "langgraph-functional-tools",
+    number: "11",
+    title: "Functional API Tool Execution",
+    subtitle: "@task führt dasselbe echte Python-Tool aus",
+    goal: "Tool-Ausführung als Functional-API-Task beobachten und mit der Graph API vergleichen.",
+    prompt: "Zähle die Wörter mit einem Tool",
+    expectedEvents: [
+      "RUN_STARTED",
+      "TOOL_CALL_START",
+      "TOOL_CALL_ARGS",
+      "TOOL_CALL_END",
+      "TOOL_CALL_RESULT",
+      "RUN_FINISHED",
+    ],
+    source: "backend/app/langgraph_advanced_flows.py → run_functional_tool_flow()",
+    keyIdea: "Die Orchestrierung nutzt @entrypoint/@task; dieselbe Translator-Grenze erzeugt das identische AG-UI-Vokabular.",
+    endpoint: "/api/langgraph-functional-tools",
+    badge: "F·TOOL",
+  },
+  {
+    id: "langgraph-graph-hitl",
+    number: "12",
+    title: "Graph API HITL",
+    subtitle: "Checkpoint, interrupt() und Command(resume)",
+    goal: "Einen StateGraph vor einer Tool-Ausführung wirklich pausieren und nach Freigabe fortsetzen.",
+    prompt: "Führe die geschützte Aktion aus",
+    expectedEvents: [
+      "TOOL_CALL_START",
+      "RUN_FINISHED",
+      "TOOL_CALL_RESULT",
+      "TEXT_MESSAGE_CONTENT",
+    ],
+    source: "backend/app/langgraph_advanced_flows.py → run_graph_hitl_flow()",
+    keyIdea: "Das Tool läuft erst nach einem echten LangGraph-Checkpoint und Command(resume=True).",
+    endpoint: "/api/langgraph-graph-hitl",
+    badge: "G·HITL",
+  },
+  {
+    id: "langgraph-functional-hitl",
+    number: "13",
+    title: "Functional API HITL",
+    subtitle: "Interrupt innerhalb einer @task und Resume",
+    goal: "Eine Functional-API-Task pausieren, checkpointen und kontrolliert fortsetzen.",
+    prompt: "Führe die geschützte Aktion aus",
+    expectedEvents: [
+      "TOOL_CALL_START",
+      "RUN_FINISHED",
+      "TOOL_CALL_RESULT",
+      "TEXT_MESSAGE_CONTENT",
+    ],
+    source: "backend/app/langgraph_advanced_flows.py → run_functional_hitl_flow()",
+    keyIdea: "Auch die Functional API nutzt echte interrupt()-Semantik; der Resume-Wert wird zum Rückgabewert der pausierten Task.",
+    endpoint: "/api/langgraph-functional-hitl",
+    badge: "F·HITL",
   },
 ];
 
@@ -225,6 +344,7 @@ export const eventExplanations: Record<string, EventExplanation> = {
   },
 };
 
-export function explainEvent(type: string): EventExplanation {
-  return eventExplanations[type] ?? { ...generic, label: type };
+export function explainEvent(type: string, sourceOverride?: string): EventExplanation {
+  const explanation = eventExplanations[type] ?? { ...generic, label: type };
+  return sourceOverride ? { ...explanation, source: sourceOverride } : explanation;
 }
