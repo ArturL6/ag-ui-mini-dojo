@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 
 import pytest
 from ag_ui.core import EventType, RunAgentInput
+from httpx import ASGITransport, AsyncClient
 
 from app.langgraph_advanced_flows import (
+    WORKFLOW_GATES,
     run_functional_hitl_flow,
     run_functional_tool_flow,
     run_graph_hitl_flow,
@@ -16,10 +19,16 @@ from app.langgraph_agui_translator import LangGraphAguiTranslator
 from app.main import app
 
 
-def input_for(*, thread_id: str, prompt: str = "Zähle die Wörter mit einem Tool", resume=None):
+def input_for(
+    *,
+    thread_id: str,
+    prompt: str = "Zähle die Wörter mit einem Tool",
+    resume=None,
+    run_id: str | None = None,
+):
     return RunAgentInput(
         thread_id=thread_id,
-        run_id=f"run-{thread_id}",
+        run_id=run_id or f"run-{thread_id}",
         state={},
         messages=[{"id": "user-1", "role": "user", "content": prompt}],
         tools=[],
@@ -214,7 +223,153 @@ async def test_resume_rejects_an_interrupt_id_from_another_checkpoint(runner, th
 
     assert len(invalid) == 1
     assert invalid[0].type == EventType.RUN_ERROR
-    assert invalid[0].code == "INVALID_INTERRUPT_ID"
+    assert invalid[0].code == "INVALID_RESUME"
+
+
+@pytest.mark.parametrize("runner", [run_graph_hitl_flow, run_functional_hitl_flow])
+@pytest.mark.parametrize(
+    "payload",
+    ["yes", {"approved": "false"}, {"approved": 1}, {}, []],
+)
+async def test_malformed_resume_payload_emits_error_and_preserves_checkpoint(runner, payload):
+    thread_id = f"malformed-{runner.__name__}-{repr(payload)}"
+    first_run = await collect(runner(input_for(thread_id=thread_id), delay_ms=0))
+    interrupt_id = first_run[-1].outcome.interrupts[0].id
+    malformed = await collect(
+        runner(
+            input_for(
+                thread_id=thread_id,
+                run_id=f"malformed-run-{thread_id}",
+                resume=[
+                    {
+                        "interrupt_id": interrupt_id,
+                        "status": "resolved",
+                        "payload": payload,
+                    }
+                ],
+            ),
+            delay_ms=0,
+        )
+    )
+
+    assert len(malformed) == 1
+    assert malformed[0].type == EventType.RUN_ERROR
+    assert malformed[0].code == "INVALID_RESUME"
+    assert not any(event.type == EventType.TOOL_CALL_RESULT for event in malformed)
+
+    valid = await collect(
+        runner(
+            input_for(
+                thread_id=thread_id,
+                run_id=f"valid-run-{thread_id}",
+                resume=[
+                    {
+                        "interrupt_id": interrupt_id,
+                        "status": "resolved",
+                        "payload": {"approved": True},
+                    }
+                ],
+            ),
+            delay_ms=0,
+        )
+    )
+    assert sum(event.type == EventType.TOOL_CALL_RESULT for event in valid) == 1
+    assert valid[-1].outcome.type == "success"
+
+
+@pytest.mark.parametrize("runner", [run_graph_hitl_flow, run_functional_hitl_flow])
+async def test_cancelled_resume_status_is_not_treated_as_rejection(runner):
+    thread_id = f"cancelled-{runner.__name__}"
+    first_run = await collect(runner(input_for(thread_id=thread_id), delay_ms=0))
+    interrupt_id = first_run[-1].outcome.interrupts[0].id
+    cancelled = await collect(
+        runner(
+            input_for(
+                thread_id=thread_id,
+                resume=[
+                    {
+                        "interrupt_id": interrupt_id,
+                        "status": "cancelled",
+                        "payload": {"approved": False},
+                    }
+                ],
+            ),
+            delay_ms=0,
+        )
+    )
+
+    assert len(cancelled) == 1
+    assert cancelled[0].type == EventType.RUN_ERROR
+    assert cancelled[0].code == "INVALID_RESUME"
+
+
+@pytest.mark.parametrize(
+    ("runner", "endpoint"),
+    [
+        (run_graph_hitl_flow, "/agent/langgraph-graph-hitl"),
+        (run_functional_hitl_flow, "/agent/langgraph-functional-hitl"),
+    ],
+)
+async def test_malformed_resume_is_a_complete_http_sse_error(runner, endpoint):
+    thread_id = f"http-malformed-{runner.__name__}"
+    first_run = await collect(runner(input_for(thread_id=thread_id), delay_ms=0))
+    interrupt_id = first_run[-1].outcome.interrupts[0].id
+    request = input_for(
+        thread_id=thread_id,
+        run_id=f"http-resume-{thread_id}",
+        resume=[
+            {
+                "interrupt_id": interrupt_id,
+                "status": "resolved",
+                "payload": "yes",
+            }
+        ],
+    )
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.post(
+            f"{endpoint}?delay_ms=0",
+            json=request.model_dump(by_alias=True),
+            headers={"accept": "text/event-stream"},
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert '"type":"RUN_ERROR"' in response.text
+    assert '"code":"INVALID_RESUME"' in response.text
+
+
+@pytest.mark.parametrize("runner", [run_graph_hitl_flow, run_functional_hitl_flow])
+async def test_concurrent_duplicate_resume_executes_protected_tool_once(runner):
+    thread_id = f"concurrent-{runner.__name__}"
+    first_run = await collect(runner(input_for(thread_id=thread_id), delay_ms=0))
+    interrupt_id = first_run[-1].outcome.interrupts[0].id
+
+    def resume_request(run_id: str):
+        return runner(
+            input_for(
+                thread_id=thread_id,
+                run_id=run_id,
+                resume=[
+                    {
+                        "interrupt_id": interrupt_id,
+                        "status": "resolved",
+                        "payload": {"approved": True},
+                    }
+                ],
+            ),
+            delay_ms=0,
+        )
+
+    first, second = await asyncio.gather(
+        collect(resume_request("concurrent-resume-a")),
+        collect(resume_request("concurrent-resume-b")),
+    )
+    combined = [*first, *second]
+
+    assert sum(event.type == EventType.TOOL_CALL_RESULT for event in combined) == 1
+    assert sum(event.type == EventType.RUN_ERROR for event in combined) == 1
+    assert not WORKFLOW_GATES
 
 
 def test_every_advanced_langgraph_lesson_has_a_separate_endpoint():

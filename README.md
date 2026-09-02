@@ -200,6 +200,8 @@ npm run test:e2e
 
 Der E2E-Test führt zwölf keylose Lektionen aus. Für beide LangGraph-APIs beweist er echte Tool-Ausführung sowie: kein `TOOL_CALL_RESULT` vor Freigabe, Interrupt-Anzeige, Resume, Tool-Ergebnis nach Freigabe und kein Tool-Ergebnis nach Ablehnung.
 
+Zusätzliche Backend-Regressionstests decken malformed Resume-Payloads, falsche Interrupt-IDs und parallele doppelte Resume-Requests ab. Die Demo serialisiert HITL pro Workflow/Thread in einem Prozess; für mehrere Worker ist ein persistenter Checkpointer mit atomarem Claim beziehungsweise idempotenter Tool-Ausführung erforderlich.
+
 ## Ist die LangGraph→AG-UI-Übersetzung echt?
 
 Ja, als **echter, zentraler und benutzerdefinierter Runtime-Adapter**: [`LangGraphAguiTranslator`](backend/app/langgraph_agui_translator.py) verarbeitet die Runtime-Ausgaben aller LangGraph-Lektionen. `astream(..., stream_mode=["custom", "updates"])` liefert echte Chunks zur Laufzeit; erst danach ordnet der Translator sie AG-UI-Events zu.

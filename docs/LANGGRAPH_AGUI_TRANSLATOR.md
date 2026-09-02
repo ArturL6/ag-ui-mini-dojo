@@ -70,6 +70,8 @@ Run A
 
 Run B
   RunAgentInput.resume[]
+  → status, Payload-Typ und exakter Boolean werden validiert
+  → Interrupt-ID wird gegen den offenen Checkpoint geprüft
   → Command(resume=True|False)
   → pausierte LangGraph-Ausführung wird fortgesetzt
   → Tool läuft nur bei True
@@ -77,4 +79,6 @@ Run B
   → success outcome
 ```
 
-`InMemorySaver` ist für das lokale Lern-Lab geeignet. Für mehrere Prozesse, Neustartfestigkeit oder Produktion wäre ein dauerhafter LangGraph-Checkpointer erforderlich.
+Ein prozesslokales Async-Gate serialisiert initiale und fortgesetzte Runs pro Workflow/Thread. Dadurch kann derselbe Interrupt bei zwei gleichzeitigen Requests in diesem Ein-Prozess-Lab nur einmal konsumiert werden; der zweite Request erhält `RUN_ERROR`. Die Gates werden entfernt, sobald keine laufenden oder wartenden Requests mehr existieren.
+
+`InMemorySaver` ist ausschließlich für das lokale Ein-Prozess-Lern-Lab geeignet. Er behält Checkpoints für die Lebensdauer des Prozesses und implementiert hier keine fachliche Retention oder Bereinigung. Bei Neustart gehen offene Interrupts verloren. Mehrere Worker/Prozesse würden außerdem eine dauerhafte gemeinsame Checkpoint-Ablage mit atomarem Resume-Claim beziehungsweise idempotenter Tool-Ausführung benötigen.

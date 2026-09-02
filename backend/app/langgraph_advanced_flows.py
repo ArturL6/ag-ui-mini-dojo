@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+import asyncio
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
+from dataclasses import dataclass, field
 from typing import Any, TypedDict
 
 from ag_ui.core import BaseEvent, EventType, RunAgentInput, RunErrorEvent
@@ -12,6 +15,32 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 
 from .langgraph_agui_translator import LangGraphAguiTranslator
+
+
+@dataclass
+class WorkflowGate:
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    users: int = 0
+
+
+WORKFLOW_GATES: dict[tuple[str, str], WorkflowGate] = {}
+
+
+@asynccontextmanager
+async def serialized_workflow(workflow: str, thread_id: str):
+    """Serialize one checkpoint thread and remove the gate after all waiters leave."""
+
+    key = (workflow, thread_id)
+    gate = WORKFLOW_GATES.setdefault(key, WorkflowGate())
+    gate.users += 1
+    await gate.lock.acquire()
+    try:
+        yield
+    finally:
+        gate.lock.release()
+        gate.users -= 1
+        if gate.users == 0:
+            WORKFLOW_GATES.pop(key, None)
 
 
 class ToolFlowState(TypedDict, total=False):
@@ -326,15 +355,22 @@ async def resume_input(
 ):
     if not input_data.resume:
         return initial
+    if len(input_data.resume) != 1:
+        raise ValueError("Genau ein Resume-Eintrag wird für diese Lernlektion erwartet")
     entry = input_data.resume[0]
+    if entry.status != "resolved":
+        raise ValueError("Resume-Status muss 'resolved' sein")
+    if not isinstance(entry.payload, Mapping):
+        raise ValueError("Resume-Payload muss ein Objekt mit approved: boolean sein")
+    if "approved" not in entry.payload or type(entry.payload["approved"]) is not bool:
+        raise ValueError("Resume-Payload benötigt approved als echten Boolean")
     state = await runnable.aget_state(config)
     pending_ids = {item.id for item in state.interrupts}
     if entry.interrupt_id not in pending_ids:
         raise ValueError(
             f"Interrupt-ID {entry.interrupt_id!r} gehört nicht zum offenen LangGraph-Checkpoint"
         )
-    approved = entry.status == "resolved" and bool((entry.payload or {}).get("approved"))
-    return Command(resume=approved)
+    return Command(resume=entry.payload["approved"])
 
 
 async def translated_stream(
@@ -415,57 +451,59 @@ async def run_graph_hitl_flow(
     input_data: RunAgentInput, delay_ms: int = 180
 ) -> AsyncIterator[BaseEvent]:
     config = {"configurable": {"thread_id": f"graph-hitl:{input_data.thread_id}"}}
-    try:
-        graph_input = await resume_input(
+    async with serialized_workflow("graph-hitl", input_data.thread_id):
+        try:
+            graph_input = await resume_input(
+                GRAPH_HITL_WORKFLOW,
+                input_data,
+                {"prompt": latest_user_text(input_data)},
+                config,
+            )
+        except ValueError as exc:
+            yield RunErrorEvent(
+                type=EventType.RUN_ERROR,
+                message=str(exc),
+                code="INVALID_RESUME",
+            )
+            return
+        async for event in translated_stream(
             GRAPH_HITL_WORKFLOW,
+            graph_input,
             input_data,
-            {"prompt": latest_user_text(input_data)},
-            config,
-        )
-    except ValueError as exc:
-        yield RunErrorEvent(
-            type=EventType.RUN_ERROR,
-            message=str(exc),
-            code="INVALID_INTERRUPT_ID",
-        )
-        return
-    async for event in translated_stream(
-        GRAPH_HITL_WORKFLOW,
-        graph_input,
-        input_data,
-        api="graph",
-        workflow="graph-hitl",
-        delay_ms=delay_ms,
-        config=config,
-    ):
-        yield event
+            api="graph",
+            workflow="graph-hitl",
+            delay_ms=delay_ms,
+            config=config,
+        ):
+            yield event
 
 
 async def run_functional_hitl_flow(
     input_data: RunAgentInput, delay_ms: int = 180
 ) -> AsyncIterator[BaseEvent]:
     config = {"configurable": {"thread_id": f"functional-hitl:{input_data.thread_id}"}}
-    try:
-        graph_input = await resume_input(
+    async with serialized_workflow("functional-hitl", input_data.thread_id):
+        try:
+            graph_input = await resume_input(
+                functional_hitl_workflow,
+                input_data,
+                {"prompt": latest_user_text(input_data)},
+                config,
+            )
+        except ValueError as exc:
+            yield RunErrorEvent(
+                type=EventType.RUN_ERROR,
+                message=str(exc),
+                code="INVALID_RESUME",
+            )
+            return
+        async for event in translated_stream(
             functional_hitl_workflow,
+            graph_input,
             input_data,
-            {"prompt": latest_user_text(input_data)},
-            config,
-        )
-    except ValueError as exc:
-        yield RunErrorEvent(
-            type=EventType.RUN_ERROR,
-            message=str(exc),
-            code="INVALID_INTERRUPT_ID",
-        )
-        return
-    async for event in translated_stream(
-        functional_hitl_workflow,
-        graph_input,
-        input_data,
-        api="functional",
-        workflow="functional-hitl",
-        delay_ms=delay_ms,
-        config=config,
-    ):
-        yield event
+            api="functional",
+            workflow="functional-hitl",
+            delay_ms=delay_ms,
+            config=config,
+        ):
+            yield event
