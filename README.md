@@ -18,7 +18,7 @@ Browser / React
     ▼
 Next.js 16
     │
-    │ Streaming Reverse Proxy (/api/agent)
+    │ Streaming Reverse Proxy (/api/agent oder /api/langgraph)
     ▼
 Python 3.11 / FastAPI
     │
@@ -46,8 +46,9 @@ Die vollständige Erklärung aller zehn Transport- und Verarbeitungsschritte ste
 | 05 | Human in the Loop | Interrupt, sichtbare Freigabe und Fortsetzung in einem neuen Run |
 | 06 | Error Path | `RUN_ERROR` als terminales, sichtbares Protokollereignis |
 | 07 | Real LLM Stream | echter OpenAI-Stream, übersetzt in dieselben AG-UI-Text-Events |
+| 08 | LangGraph Flow | echte Nodes, bedingte Kante und separater AG-UI-Adapter |
 
-Die ersten sechs Lektionen sind deterministisch und benötigen keinen API-Key. Lektion 07 ist optional.
+Die Lektionen 01 bis 06 und 08 sind deterministisch und benötigen keinen API-Key. Lektion 07 ist optional.
 
 ## Schnellstart mit Docker Compose
 
@@ -120,6 +121,7 @@ Dann http://localhost:3000 öffnen.
 5. Öffne parallel die dort angegebene Funktion in `backend/app/scenarios.py`.
 6. Wiederhole das für Lektion 02 bis 06.
 7. Setze erst danach optional den OpenAI-Key und vergleiche Lektion 07 mit der deterministischen Streaming-Lektion.
+8. Öffne Lektion 08 und vergleiche den echten LangGraph-State mit den daraus übersetzten AG-UI-Events.
 
 ## Warum ein deterministischer Lernmodus wichtig ist
 
@@ -127,7 +129,7 @@ Ein echtes LLM macht Inhalt und Anzahl der Chunks variabel. Das ist produktionsn
 
 - **Protokoll lernen:** reproduzierbare Szenarien mit bekannten Eventsequenzen;
 - **Provider integrieren:** echter OpenAI-Stream in Lektion 07;
-- **Framework integrieren:** später LangGraph, Google ADK, MAF oder andere Backends hinter derselben AG-UI-Grenze.
+- **Framework integrieren:** echter, separat gehaltener LangGraph-Flow in Lektion 08; ADK oder MAF können nach demselben Muster folgen.
 
 ## Projektstruktur
 
@@ -135,8 +137,9 @@ Ein echtes LLM macht Inhalt und Anzahl der Chunks variabel. Das ist produktionsn
 ag-ui-mini-dojo/
 ├── backend/
 │   ├── app/
-│   │   ├── main.py            # FastAPI-Endpunkt + EventEncoder
-│   │   └── scenarios.py       # sieben ausführbare Lern-Szenarien
+│   │   ├── main.py            # getrennte FastAPI-Endpunkte + EventEncoder
+│   │   ├── scenarios.py       # sieben unveränderte Lern-Szenarien
+│   │   └── langgraph_flow.py  # echter Graph + separater AG-UI-Adapter
 │   ├── tests/
 │   │   └── test_scenarios.py  # Eventsequenzen und Interrupt-Resume
 │   ├── Dockerfile
@@ -149,7 +152,7 @@ ag-ui-mini-dojo/
 │   ├── lib/
 │   │   └── learning.ts        # Lektionen und Erklärungen aller Eventtypen
 │   ├── e2e/
-│   │   └── learning-flow.mjs  # Browserprüfung der sechs keylosen Lektionen
+│   │   └── learning-flow.mjs  # Browserprüfung der sieben keylosen Lektionen
 │   └── Dockerfile
 ├── docs/
 │   └── REQUEST_FLOW.md        # vollständiger Hin- und Rückweg
@@ -182,7 +185,7 @@ cd frontend
 npm run test:e2e
 ```
 
-Der E2E-Test führt Lifecycle, Streaming, Tools, State, Interrupt mit Freigabe und Fehlerpfad über die echte UI aus.
+Der E2E-Test führt Lifecycle, Streaming, Tools, State, Interrupt mit Freigabe, Fehlerpfad und den separaten LangGraph-Flow über die echte UI aus.
 
 ## Was AG-UI hier leistet
 

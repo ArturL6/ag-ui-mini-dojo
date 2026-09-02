@@ -36,8 +36,18 @@ try {
   if (!state.includes('"progress": 100')) throw new Error("Finaler Shared State fehlt");
   if (!(await page.getByTestId("event-inspector").isVisible())) throw new Error("Event Inspector fehlt");
 
+  await runLesson("langgraph", "STATE_DELTA");
+  const graphState = await page.getByTestId("client-state").innerText();
+  for (const node of ["understand", "learning_tool", "respond"]) {
+    if (!graphState.includes(`"${node}"`)) throw new Error(`LangGraph-Node ${node} fehlt`);
+  }
+  const graphAnswer = await page.getByTestId("answer").innerText();
+  if (!graphAnswer.includes("LangGraph hat den Tool-Pfad gewählt")) {
+    throw new Error("LangGraph-Antwort fehlt");
+  }
+
   await page.screenshot({ path: "../artifacts/ag-ui-learning-lab.png", fullPage: true });
-  console.log(JSON.stringify({ ok: true, lessons: 6, screenshot: "artifacts/ag-ui-learning-lab.png" }));
+  console.log(JSON.stringify({ ok: true, lessons: 7, screenshot: "artifacts/ag-ui-learning-lab.png" }));
 } finally {
   await browser.close();
 }

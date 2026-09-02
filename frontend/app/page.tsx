@@ -52,7 +52,12 @@ export default function LearningLab() {
     () => events.find((entry) => entry.id === selectedId) ?? events.at(-1),
     [events, selectedId],
   );
-  const explanation = selected ? explainEvent(selected.event.type) : null;
+  const explanation = selected
+    ? explainEvent(
+        selected.event.type,
+        lesson.id === "langgraph" ? "backend/app/langgraph_flow.py → run_langgraph_flow()" : undefined,
+      )
+    : null;
   const seenTypes = new Set(events.map(({ event }) => String(event.type)));
 
   function chooseLesson(next: Lesson) {
@@ -123,7 +128,9 @@ export default function LearningLab() {
     setStatus("running");
 
     const agent = new HttpAgent({
-      url: `/api/agent?scenario=${lesson.id}&delay_ms=${delayMs}`,
+      url: lesson.endpoint
+        ? `${lesson.endpoint}?delay_ms=${delayMs}`
+        : `/api/agent?scenario=${lesson.id}&delay_ms=${delayMs}`,
       agentId: "learning-agent",
       threadId: `lesson-${lesson.id}`,
     });
@@ -184,20 +191,20 @@ export default function LearningLab() {
             >
               <span>{item.number}</span>
               <div><strong>{item.title}</strong><small>{item.subtitle}</small></div>
-              {item.optional && <em>KEY</em>}
+              {item.badge && <em>{item.badge}</em>}
             </button>
           ))}
         </nav>
         <div className="stack-card">
           <small>LIVE STACK</small>
-          <span>Next.js 16</span><span>FastAPI</span><span>@ag-ui/client</span><span>Docker Compose</span>
+          <span>Next.js 16</span><span>FastAPI</span><span>@ag-ui/client</span><span>LangGraph (Lektion 08)</span><span>Docker Compose</span>
         </div>
       </aside>
 
       <div className="workspace">
         <header className="topbar">
           <div>
-            <span className="kicker">LEKTION {lesson.number} / 07</span>
+            <span className="kicker">LEKTION {lesson.number} / {String(lessons.length).padStart(2, "0")}</span>
             <h1>{lesson.title}</h1>
             <p>{lesson.goal}</p>
           </div>

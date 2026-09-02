@@ -9,6 +9,8 @@ export type Lesson = {
   source: string;
   keyIdea: string;
   optional?: boolean;
+  endpoint?: string;
+  badge?: string;
 };
 
 export const lessons: Lesson[] = [
@@ -89,6 +91,27 @@ export const lessons: Lesson[] = [
     source: "backend/app/scenarios.py → llm_scenario()",
     keyIdea: "Der Provider ist austauschbar; die Oberfläche konsumiert weiterhin AG-UI-Events.",
     optional: true,
+    badge: "KEY",
+  },
+  {
+    id: "langgraph",
+    number: "08",
+    title: "LangGraph Flow",
+    subtitle: "Echte Nodes und bedingte Kanten, separat adaptiert",
+    goal: "LangGraph-State und Node-Updates unabhängig erzeugen und als AG-UI-Events beobachten.",
+    prompt: "Erzeuge eine Checkliste mit einem Tool und zeige mir den Flow",
+    expectedEvents: [
+      "RUN_STARTED",
+      "STATE_SNAPSHOT",
+      "STEP_STARTED",
+      "STATE_DELTA",
+      "TEXT_MESSAGE_CONTENT",
+      "RUN_FINISHED",
+    ],
+    source: "backend/app/langgraph_flow.py → run_langgraph_flow()",
+    keyIdea: "LangGraph orchestriert den Flow; ein separater Adapter übersetzt Node-Updates in AG-UI.",
+    endpoint: "/api/langgraph",
+    badge: "GRAPH",
   },
 ];
 
@@ -225,6 +248,7 @@ export const eventExplanations: Record<string, EventExplanation> = {
   },
 };
 
-export function explainEvent(type: string): EventExplanation {
-  return eventExplanations[type] ?? { ...generic, label: type };
+export function explainEvent(type: string, sourceOverride?: string): EventExplanation {
+  const explanation = eventExplanations[type] ?? { ...generic, label: type };
+  return sourceOverride ? { ...explanation, source: sourceOverride } : explanation;
 }

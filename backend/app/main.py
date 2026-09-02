@@ -8,6 +8,7 @@ from fastapi import FastAPI, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
+from .langgraph_flow import run_langgraph_flow
 from .scenarios import SCENARIOS, run_scenario
 
 app = FastAPI(
@@ -45,6 +46,23 @@ async def agent_endpoint(
 
     async def event_stream():
         async for event in run_scenario(scenario, input_data, delay_ms):
+            yield encoder.encode(event)
+
+    return StreamingResponse(event_stream(), media_type=encoder.get_content_type())
+
+
+@app.post("/agent/langgraph")
+async def langgraph_agent_endpoint(
+    input_data: RunAgentInput,
+    request: Request,
+    delay_ms: int = Query(default=180, ge=0, le=2000),
+) -> StreamingResponse:
+    """Run the isolated LangGraph lesson without changing the scenario runner."""
+
+    encoder = EventEncoder(accept=request.headers.get("accept"))
+
+    async def event_stream():
+        async for event in run_langgraph_flow(input_data, delay_ms):
             yield encoder.encode(event)
 
     return StreamingResponse(event_stream(), media_type=encoder.get_content_type())

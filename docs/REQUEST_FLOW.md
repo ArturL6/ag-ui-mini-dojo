@@ -43,7 +43,7 @@ Der HTTP-Request ist ein `POST` mit JSON-Body und `Accept`-Header für einen AG-
 
 **Datei:** `frontend/next.config.ts`
 
-Der Browser ruft `/api/agent` auf. Next.js leitet den Request im Docker-Netz an `http://backend:8000/agent` weiter. Dadurch muss der Browser keine internen Docker-Hostnamen kennen und der SSE-Stream bleibt erhalten.
+Der Browser ruft für die bisherigen Lektionen `/api/agent` auf. Next.js leitet den Request im Docker-Netz an `http://backend:8000/agent` weiter. Lektion 08 verwendet getrennt davon `/api/langgraph` → `http://backend:8000/agent/langgraph`. Dadurch muss der Browser keine internen Docker-Hostnamen kennen und der SSE-Stream bleibt erhalten.
 
 ### 4. FastAPI validiert `RunAgentInput`
 
@@ -69,6 +69,20 @@ yield RunFinishedEvent(...)
 ```
 
 Der Generator ist der lehrbare Ersatz für einen echten Agenten-Workflow. Lektion 07 ersetzt nur die Textquelle durch einen realen OpenAI-Stream; das AG-UI-Protokoll bleibt gleich.
+
+### 5a. Der separate LangGraph-Pfad in Lektion 08
+
+**Datei:** `backend/app/langgraph_flow.py`
+**Endpunkt:** `POST /agent/langgraph`
+
+Dieser Pfad ist absichtlich nicht in `SCENARIOS` registriert. Ein echter `StateGraph` führt aus:
+
+```text
+START → understand ─┬─ tool → learning_tool → respond → END
+                    └─ direct ─────────────→ respond → END
+```
+
+`LEARNING_GRAPH.astream(..., stream_mode="updates")` liefert nach jedem Node dessen State-Update. `run_langgraph_flow()` übersetzt diese Updates anschließend in `STEP_*`, `STATE_*` und `TEXT_MESSAGE_*`. LangGraph entscheidet damit den internen Ablauf, während AG-UI ausschließlich die sichtbare Grenze zur Oberfläche bildet.
 
 ## Rückweg: vom Python-Agenten zur sichtbaren UI
 
@@ -140,6 +154,6 @@ Ein Interrupt hält also nicht unbegrenzt denselben HTTP-Request offen. Er schaf
 - **Datenbank:** Für stateless Lernläufe noch nicht erforderlich.
 - **Redis/Queue:** Die Szenarien sind kurz und laufen im Requestprozess.
 - **Authentifizierung:** Würde vom AG-UI-Protokoll getrennt an Proxy/API ergänzt.
-- **Framework-Adapter:** LangGraph, ADK oder MAF können später dieselbe Eventgrenze bedienen.
+- **Weitere Framework-Adapter:** LangGraph ist in Lektion 08 exemplarisch vorhanden; ADK oder MAF könnten später dieselbe Eventgrenze bedienen.
 
 Diese Dienste sollten erst ergänzt werden, wenn eine Lektion ihren konkreten Nutzen demonstriert. Docker Compose ist bereits so strukturiert, dass weitere Services ergänzt werden können.
