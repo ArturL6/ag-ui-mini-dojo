@@ -18,6 +18,16 @@ const pipeline = [
   ["6", "Subscriber", "UI + State"],
 ];
 
+const langGraphPipeline = [
+  ["1", "Browser", "RunAgentInput"],
+  ["2", "FastAPI", "separater Endpoint"],
+  ["3", "LangGraph", "Graph oder Functional API"],
+  ["4", "Runtime", "updates / custom / interrupt"],
+  ["5", "Translator", "LangGraph → AG-UI"],
+  ["6", "EventEncoder", "SSE Frames"],
+  ["7", "Subscriber", "UI + State"],
+];
+
 function eventTone(type: string) {
   if (type.startsWith("RUN_")) return "lifecycle";
   if (type.startsWith("TEXT_")) return "text";
@@ -59,6 +69,7 @@ export default function LearningLab() {
       )
     : null;
   const seenTypes = new Set(events.map(({ event }) => String(event.type)));
+  const activePipeline = lesson.id.startsWith("langgraph") ? langGraphPipeline : pipeline;
 
   function chooseLesson(next: Lesson) {
     setLesson(next);
@@ -217,12 +228,12 @@ export default function LearningLab() {
         </header>
 
         <section className="architecture" aria-label="Architekturfluss">
-          {pipeline.map(([number, title, detail], index) => (
+          {activePipeline.map(([number, title, detail], index) => (
             <div className="pipeline-wrap" key={title}>
               <div className="pipeline-node">
                 <span>{number}</span><strong>{title}</strong><small>{detail}</small>
               </div>
-              {index < pipeline.length - 1 && <b>→</b>}
+              {index < activePipeline.length - 1 && <b>→</b>}
             </div>
           ))}
         </section>

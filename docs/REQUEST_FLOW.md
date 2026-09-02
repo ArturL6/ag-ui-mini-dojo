@@ -43,7 +43,7 @@ Der HTTP-Request ist ein `POST` mit JSON-Body und `Accept`-Header für einen AG-
 
 **Datei:** `frontend/next.config.ts`
 
-Der Browser ruft für die bisherigen Lektionen `/api/agent` auf. Next.js leitet den Request im Docker-Netz an `http://backend:8000/agent` weiter. Lektion 08 verwendet getrennt davon `/api/langgraph` → `http://backend:8000/agent/langgraph`; Lektion 09 nutzt `/api/langgraph-functional` → `http://backend:8000/agent/langgraph-functional`. Dadurch muss der Browser keine internen Docker-Hostnamen kennen und der SSE-Stream bleibt erhalten.
+Der Browser ruft für die bisherigen Lektionen `/api/agent` auf. Next.js leitet den Request im Docker-Netz an `http://backend:8000/agent` weiter. Die LangGraph-Lektionen 08–13 besitzen jeweils eigene Proxy- und Backend-Endpunkte für Graph/Functional Basics, Tools und HITL. Dadurch muss der Browser keine internen Docker-Hostnamen kennen und der SSE-Stream bleibt erhalten.
 
 ### 4. FastAPI validiert `RunAgentInput`
 
@@ -105,7 +105,33 @@ async for stream_mode, runtime_chunk in functional_workflow.astream(
     # runtime_chunk → AG-UI STEP/STATE/TEXT event
 ```
 
-Damit ist die Übersetzung real, aber benutzerdefiniert: Die Quell-Chunks kommen aus der tatsächlichen LangGraph-Ausführung; `run_functional_flow()` definiert die fachliche Zuordnung zum AG-UI-Vokabular. `lastCustomLangGraphChunk` und `lastUpdateLangGraphChunk` legen im sichtbaren Client-State beide Stream-Modi samt Rohdaten offen.
+Damit ist die Übersetzung real, aber benutzerdefiniert: Die Quell-Chunks kommen aus der tatsächlichen LangGraph-Ausführung; `LangGraphAguiTranslator` definiert zentral die fachliche Zuordnung zum AG-UI-Vokabular. `lastCustomLangGraphChunk` und `lastUpdateLangGraphChunk` legen im sichtbaren Client-State beide Stream-Modi samt Rohdaten offen.
+
+### 5c. Tool-Ausführung in Lektion 10 und 11
+
+**Dateien:** `backend/app/langgraph_advanced_flows.py`, `backend/app/langgraph_agui_translator.py`
+
+Beide APIs führen dasselbe echte, mit `@tool` dekorierte Tool `count_words` über `.invoke(...)` aus. Die Graph API ruft es in einer StateGraph-Node auf; die Functional API ruft es innerhalb einer `@task` auf. Vor und nach dem Aufruf schreibt die laufende Node/Task explizite Signale über LangGraphs `get_stream_writer()`:
+
+```text
+tool_call_start → count_words(...) → tool_call_result
+```
+
+Der zentrale Translator erzeugt daraus `TOOL_CALL_START`, `TOOL_CALL_ARGS`, `TOOL_CALL_END` und erst nach der tatsächlichen Ausführung `TOOL_CALL_RESULT`. Das Tool-Ergebnis enthält die gezählten Wörter und `executed: true`; es ist kein vorab festgelegtes AG-UI-Demoresultat.
+
+### 5d. Echte HITL-Interrupts in Lektion 12 und 13
+
+Beide Workflows verwenden einen `InMemorySaver`. Der erste Run schlägt das Tool vor und erreicht danach LangGraphs echtes `interrupt()`:
+
+```text
+Graph/Task → interrupt(payload) → Checkpoint → __interrupt__ update
+```
+
+Der Translator übernimmt das echte LangGraph-Interruptobjekt einschließlich ID. Für dessen AG-UI-Repräsentation verwendet er `lg_interrupts_to_agui` aus dem offiziellen Paket `ag-ui-langgraph`. Die UI sendet ihre Entscheidung in einem neuen `RunAgentInput.resume[]`; das Backend setzt denselben LangGraph-Thread mit `Command(resume=True|False)` fort.
+
+Das geschützte Tool liegt hinter der Approval-Kante beziehungsweise hinter der Functional-API-Verzweigung und kann deshalb vor der Freigabe nicht laufen. Der E2E-Test prüft explizit, dass im ersten Run kein `TOOL_CALL_RESULT` existiert und es erst nach Freigabe erscheint.
+
+Die vollständige Mapping-Tabelle und die Grenze zwischen nativen Runtime-Daten und Anwendungscode stehen in [`LANGGRAPH_AGUI_TRANSLATOR.md`](LANGGRAPH_AGUI_TRANSLATOR.md).
 
 ## Rückweg: vom Python-Agenten zur sichtbaren UI
 
@@ -172,9 +198,11 @@ Lektion 05 besteht absichtlich aus zwei Runs:
 
 Ein Interrupt hält also nicht unbegrenzt denselben HTTP-Request offen. Er schafft eine robuste, auditierbare Grenze zwischen Vorschlag und menschlicher Entscheidung.
 
+Lektion 12 und 13 demonstrieren denselben AG-UI-Ablauf mit tatsächlicher LangGraph-Persistenzsemantik: `interrupt()` pausiert, der Checkpointer hält den Zustand und `Command(resume=...)` liefert die Entscheidung zurück in die pausierte Node beziehungsweise Task.
+
 ## Was in dieser Version bewusst nicht enthalten ist
 
-- **Datenbank:** Für stateless Lernläufe noch nicht erforderlich.
+- **Dauerhafter Checkpointer:** HITL verwendet bewusst `InMemorySaver`; ein Prozessneustart verwirft offene Lern-Interrupts.
 - **Redis/Queue:** Die Szenarien sind kurz und laufen im Requestprozess.
 - **Authentifizierung:** Würde vom AG-UI-Protokoll getrennt an Proxy/API ergänzt.
 - **Weitere Framework-Adapter:** LangGraph Graph API und Functional API sind exemplarisch vorhanden; ADK oder MAF könnten später dieselbe Eventgrenze bedienen.

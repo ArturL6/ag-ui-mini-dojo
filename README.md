@@ -48,8 +48,12 @@ Die vollständige Erklärung aller zehn Transport- und Verarbeitungsschritte ste
 | 07 | Real LLM Stream | echter OpenAI-Stream, übersetzt in dieselben AG-UI-Text-Events |
 | 08 | LangGraph Flow | echte Nodes, bedingte Kante und separater AG-UI-Adapter |
 | 09 | LangGraph Functional API | `@entrypoint`, `@task`, Python-Verzweigung und echte Runtime-Chunks |
+| 10 | Graph API Tool Execution | echter Python-Tool-Aufruf mit vollständigem AG-UI-Tool-Lifecycle |
+| 11 | Functional API Tool Execution | derselbe Tool-Aufruf innerhalb einer echten `@task` |
+| 12 | Graph API HITL | `InMemorySaver`, echter `interrupt()` und `Command(resume=...)` |
+| 13 | Functional API HITL | Interrupt innerhalb einer Task und kontrollierte Fortsetzung |
 
-Die Lektionen 01 bis 06 sowie 08 und 09 sind deterministisch und benötigen keinen API-Key. Lektion 07 ist optional.
+Die Lektionen 01 bis 06 sowie 08 bis 13 sind deterministisch und benötigen keinen API-Key. Lektion 07 ist optional.
 
 ## Schnellstart mit Docker Compose
 
@@ -124,6 +128,8 @@ Dann http://localhost:3000 öffnen.
 7. Setze erst danach optional den OpenAI-Key und vergleiche Lektion 07 mit der deterministischen Streaming-Lektion.
 8. Öffne Lektion 08 und vergleiche den echten LangGraph-State mit den daraus übersetzten AG-UI-Events.
 9. Vergleiche in Lektion 09 die Functional API und ihre sichtbaren `custom`-/`updates`-Runtime-Chunks mit der Graph API.
+10. Führe in Lektion 10 und 11 dasselbe echte Tool einmal über jede LangGraph-API aus.
+11. Pausiere in Lektion 12 und 13 vor der Tool-Ausführung und beobachte Checkpoint, Interrupt und Resume.
 
 ## Warum ein deterministischer Lernmodus wichtig ist
 
@@ -131,7 +137,7 @@ Ein echtes LLM macht Inhalt und Anzahl der Chunks variabel. Das ist produktionsn
 
 - **Protokoll lernen:** reproduzierbare Szenarien mit bekannten Eventsequenzen;
 - **Provider integrieren:** echter OpenAI-Stream in Lektion 07;
-- **Framework integrieren:** separat gehaltene LangGraph Graph API in Lektion 08 und Functional API in Lektion 09; ADK oder MAF können nach demselben Muster folgen.
+- **Framework integrieren:** LangGraph Graph und Functional API mit getrennten Routing-, Tool- und HITL-Lektionen; ADK oder MAF können nach demselben Muster folgen.
 
 ## Projektstruktur
 
@@ -141,10 +147,13 @@ ag-ui-mini-dojo/
 │   ├── app/
 │   │   ├── main.py            # getrennte FastAPI-Endpunkte + EventEncoder
 │   │   ├── scenarios.py       # sieben unveränderte Lern-Szenarien
-│   │   ├── langgraph_flow.py  # echter StateGraph + AG-UI-Adapter
-│   │   └── langgraph_functional_flow.py # echte @tasks + Runtime-Stream-Adapter
+│   │   ├── langgraph_agui_translator.py # gemeinsame Übersetzungsgrenze
+│   │   ├── langgraph_flow.py  # echter StateGraph + zentraler Translator
+│   │   ├── langgraph_functional_flow.py # echte @tasks + zentraler Translator
+│   │   └── langgraph_advanced_flows.py # Tool- und HITL-Flows beider APIs
 │   ├── tests/
-│   │   └── test_scenarios.py  # Eventsequenzen und Interrupt-Resume
+│   │   ├── test_scenarios.py
+│   │   └── test_langgraph_advanced.py # Translator, Tools und echte Resumes
 │   ├── Dockerfile
 │   ├── pyproject.toml
 │   └── uv.lock
@@ -155,10 +164,11 @@ ag-ui-mini-dojo/
 │   ├── lib/
 │   │   └── learning.ts        # Lektionen und Erklärungen aller Eventtypen
 │   ├── e2e/
-│   │   └── learning-flow.mjs  # Browserprüfung der acht keylosen Lektionen
+│   │   └── learning-flow.mjs  # Browserprüfung der zwölf keylosen Lektionen
 │   └── Dockerfile
 ├── docs/
-│   └── REQUEST_FLOW.md        # vollständiger Hin- und Rückweg
+│   ├── REQUEST_FLOW.md        # vollständiger Hin- und Rückweg
+│   └── LANGGRAPH_AGUI_TRANSLATOR.md # exaktes Mapping und Grenzen
 ├── compose.yaml
 └── .env.example
 ```
@@ -188,13 +198,13 @@ cd frontend
 npm run test:e2e
 ```
 
-Der E2E-Test führt Lifecycle, Streaming, Tools, State, Interrupt mit Freigabe, Fehlerpfad sowie beide separaten LangGraph-Varianten über die echte UI aus.
+Der E2E-Test führt zwölf keylose Lektionen aus. Für beide LangGraph-APIs beweist er echte Tool-Ausführung sowie: kein `TOOL_CALL_RESULT` vor Freigabe, Interrupt-Anzeige, Resume und Tool-Ergebnis nach Freigabe.
 
 ## Ist die LangGraph→AG-UI-Übersetzung echt?
 
-Ja, als **echter benutzerdefinierter Runtime-Adapter**: Lektion 09 startet einen mit `@entrypoint` dekorierten LangGraph-Workflow, dessen `@task`-Funktionen über den aktiven LangGraph `StreamWriter` Ereignisse senden. `functional_workflow.astream(..., stream_mode=["custom", "updates"])` liefert diese Chunks zur Laufzeit. Erst danach ordnet `run_functional_flow()` sie AG-UI-Events zu.
+Ja, als **echter, zentraler und benutzerdefinierter Runtime-Adapter**: [`LangGraphAguiTranslator`](backend/app/langgraph_agui_translator.py) verarbeitet die Runtime-Ausgaben aller LangGraph-Lektionen. `astream(..., stream_mode=["custom", "updates"])` liefert echte Chunks zur Laufzeit; erst danach ordnet der Translator sie AG-UI-Events zu.
 
-Nicht behauptet wird, dass LangGraph selbst nativ AG-UI-Events ausgibt oder dass dies ein offizieller vorgefertigter Adapter ist. Die Orchestrierung und Stream-Chunks stammen real aus LangGraph; die semantische Zuordnung zu `STEP_*`, `STATE_*` und `TEXT_MESSAGE_*` ist Anwendungscode dieses Labs. Der Client-State zeigt deshalb `lastCustomLangGraphChunk` und `lastUpdateLangGraphChunk` mit Stream-Modus und Rohdaten als überprüfbare Provenienz.
+Nicht behauptet wird, dass LangGraph selbst nativ AG-UI-Events ausgibt. Die Orchestrierung, Checkpoints, Interrupt-IDs und Stream-Chunks stammen real aus LangGraph; die semantische Zuordnung zu `STEP_*`, `STATE_*`, `TOOL_CALL_*` und `TEXT_MESSAGE_*` ist Anwendungscode dieses Labs. Für echte Interruptobjekte nutzt der Translator die offizielle Konvertierung aus `ag-ui-langgraph`. Alle Details und Grenzen stehen in [`docs/LANGGRAPH_AGUI_TRANSLATOR.md`](docs/LANGGRAPH_AGUI_TRANSLATOR.md).
 
 ## Was AG-UI hier leistet
 
@@ -217,3 +227,5 @@ Dadurch kann das Python-Backend später ersetzt oder erweitert werden, ohne im F
 - [Interrupts](https://docs.ag-ui.com/concepts/interrupts)
 - [`HttpAgent`](https://docs.ag-ui.com/sdk/js/client/http-agent)
 - [AG-UI GitHub Repository](https://github.com/ag-ui-protocol/ag-ui)
+- [LangGraph Interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)
+- [`ag-ui-langgraph`](https://pypi.org/project/ag-ui-langgraph/)

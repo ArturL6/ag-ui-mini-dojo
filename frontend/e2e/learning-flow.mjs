@@ -12,6 +12,31 @@ async function runLesson(id, expectedEvent) {
   if (!timeline.includes(expectedEvent)) throw new Error(`${id}: ${expectedEvent} fehlt`);
 }
 
+async function verifyToolLesson(id) {
+  await runLesson(id, "TOOL_CALL_RESULT");
+  const answer = await page.getByTestId("answer").innerText();
+  if (!answer.includes("6 Wörter gezählt")) throw new Error(`${id}: echtes Tool-Ergebnis fehlt`);
+}
+
+async function verifyHitlLesson(id, apiLabel) {
+  await runLesson(id, "RUN_FINISHED");
+  await page.getByTestId("approval-card").waitFor();
+  const beforeApproval = await page.getByTestId("event-timeline").innerText();
+  if (beforeApproval.includes("TOOL_CALL_RESULT")) {
+    throw new Error(`${id}: Tool wurde vor der Freigabe ausgeführt`);
+  }
+  await page.getByTestId("approve").click();
+  await page.locator(".run-status.done").waitFor({ timeout: 15_000 });
+  const timeline = await page.getByTestId("event-timeline").innerText();
+  if (!timeline.includes("TOOL_CALL_RESULT")) {
+    throw new Error(`${id}: Tool-Ergebnis nach Resume fehlt`);
+  }
+  const answer = await page.getByTestId("answer").innerText();
+  if (!answer.includes(`${apiLabel}-Tool wurde wirklich ausgeführt`)) {
+    throw new Error(`${id}: Resume-Antwort fehlt`);
+  }
+}
+
 try {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await runLesson("lifecycle", "RUN_FINISHED");
@@ -49,7 +74,8 @@ try {
   await runLesson("langgraph-functional", "STATE_DELTA");
   const functionalState = await page.getByTestId("client-state").innerText();
   for (const evidence of [
-    '"translation": "runtime-stream-to-ag-ui"',
+    '"translation": "langgraph-runtime-to-ag-ui"',
+    '"translator": "transparent-custom-v1"',
     '"streamMode": "custom"',
     '"understand_task"',
     '"learning_tool_task"',
@@ -64,8 +90,13 @@ try {
     throw new Error("Functional-API-Antwort fehlt");
   }
 
+  await verifyToolLesson("langgraph-graph-tools");
+  await verifyToolLesson("langgraph-functional-tools");
+  await verifyHitlLesson("langgraph-graph-hitl", "Graph-API");
+  await verifyHitlLesson("langgraph-functional-hitl", "Functional-API");
+
   await page.screenshot({ path: "../artifacts/ag-ui-learning-lab.png", fullPage: true });
-  console.log(JSON.stringify({ ok: true, lessons: 8, screenshot: "artifacts/ag-ui-learning-lab.png" }));
+  console.log(JSON.stringify({ ok: true, lessons: 12, screenshot: "artifacts/ag-ui-learning-lab.png" }));
 } finally {
   await browser.close();
 }

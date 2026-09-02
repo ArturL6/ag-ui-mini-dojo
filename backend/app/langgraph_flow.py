@@ -1,27 +1,13 @@
 from __future__ import annotations
 
-import asyncio
 import operator
 from collections.abc import AsyncIterator
-from typing import Annotated, Any, Literal, TypedDict
-from uuid import uuid4
+from typing import Annotated, Literal, TypedDict
 
-from ag_ui.core import (
-    BaseEvent,
-    EventType,
-    RunAgentInput,
-    RunErrorEvent,
-    RunFinishedEvent,
-    RunStartedEvent,
-    StateDeltaEvent,
-    StateSnapshotEvent,
-    StepFinishedEvent,
-    StepStartedEvent,
-    TextMessageContentEvent,
-    TextMessageEndEvent,
-    TextMessageStartEvent,
-)
+from ag_ui.core import BaseEvent, EventType, RunAgentInput, RunErrorEvent
 from langgraph.graph import END, START, StateGraph
+
+from .langgraph_agui_translator import LangGraphAguiTranslator
 
 
 class LearningGraphState(TypedDict, total=False):
@@ -103,83 +89,28 @@ def latest_user_text(input_data: RunAgentInput) -> str:
     return "Erkläre mir den LangGraph-Flow"
 
 
-async def pause(delay_ms: int) -> None:
-    await asyncio.sleep(max(delay_ms, 0) / 1000)
-
-
-def state_patch(node_name: str, update: LearningGraphState) -> list[dict[str, Any]]:
-    patch: list[dict[str, Any]] = [
-        {"op": "replace", "path": "/currentNode", "value": node_name},
-        {"op": "add", "path": "/visitedNodes/-", "value": node_name},
-    ]
-    for source_key, target_key in (
-        ("intent", "intent"),
-        ("route", "route"),
-        ("tool_result", "toolResult"),
-    ):
-        if source_key in update:
-            patch.append({"op": "replace", "path": f"/{target_key}", "value": update[source_key]})
-    return patch
-
-
-async def answer_events(text: str, delay_ms: int) -> AsyncIterator[BaseEvent]:
-    message_id = str(uuid4())
-    yield TextMessageStartEvent(
-        type=EventType.TEXT_MESSAGE_START,
-        message_id=message_id,
-        role="assistant",
-    )
-    words = text.split()
-    for index in range(0, len(words), 4):
-        chunk = " ".join(words[index : index + 4])
-        if index + 4 < len(words):
-            chunk += " "
-        await pause(delay_ms)
-        yield TextMessageContentEvent(
-            type=EventType.TEXT_MESSAGE_CONTENT,
-            message_id=message_id,
-            delta=chunk,
-        )
-    yield TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=message_id)
-
-
 async def run_langgraph_flow(
     input_data: RunAgentInput, delay_ms: int = 180
 ) -> AsyncIterator[BaseEvent]:
-    """Translate LangGraph node updates into the same AG-UI event vocabulary."""
+    """Translate native StateGraph updates through the shared translator."""
 
-    yield RunStartedEvent(
-        type=EventType.RUN_STARTED,
-        thread_id=input_data.thread_id,
-        run_id=input_data.run_id,
+    translator = LangGraphAguiTranslator(
+        input_data,
+        api="graph",
+        workflow="graph-state-routing",
+        delay_ms=delay_ms,
     )
-    yield StateSnapshotEvent(
-        type=EventType.STATE_SNAPSHOT,
-        snapshot={
-            "framework": "langgraph",
-            "currentNode": "START",
-            "visitedNodes": [],
-            "intent": None,
-            "route": "pending",
-            "toolResult": None,
-        },
-    )
+    for event in translator.start_events(graphUpdates={}):
+        yield event
 
     try:
         async for graph_update in LEARNING_GRAPH.astream(
             {"prompt": latest_user_text(input_data)}, stream_mode="updates"
         ):
+            yield translator.runtime_chunk_event("updates", graph_update)
             for node_name, update in graph_update.items():
-                yield StepStartedEvent(type=EventType.STEP_STARTED, step_name=node_name)
-                yield StateDeltaEvent(
-                    type=EventType.STATE_DELTA,
-                    delta=state_patch(node_name, update),
-                )
-                if answer := update.get("answer"):
-                    async for event in answer_events(answer, delay_ms):
-                        yield event
-                await pause(delay_ms)
-                yield StepFinishedEvent(type=EventType.STEP_FINISHED, step_name=node_name)
+                async for event in translator.translate_graph_update(node_name, update):
+                    yield event
     except Exception as exc:
         yield RunErrorEvent(
             type=EventType.RUN_ERROR,
@@ -188,9 +119,4 @@ async def run_langgraph_flow(
         )
         return
 
-    yield RunFinishedEvent(
-        type=EventType.RUN_FINISHED,
-        thread_id=input_data.thread_id,
-        run_id=input_data.run_id,
-        outcome={"type": "success"},
-    )
+    yield translator.success_finished()

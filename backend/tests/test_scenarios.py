@@ -134,7 +134,8 @@ async def test_functional_runtime_chunks_are_translated_to_ag_ui_events():
     deltas = [event for event in events if event.type == EventType.STATE_DELTA]
 
     assert event_types[0] == EventType.RUN_STARTED
-    assert snapshots[0].snapshot["translation"] == "runtime-stream-to-ag-ui"
+    assert snapshots[0].snapshot["translation"] == "langgraph-runtime-to-ag-ui"
+    assert snapshots[0].snapshot["translator"] == "transparent-custom-v1"
     assert step_names == ["understand_task", "learning_tool_task", "respond_task"]
     assert any(
         operation.get("path") == "/lastLangGraphChunk"

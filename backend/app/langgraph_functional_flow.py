@@ -1,27 +1,13 @@
 from __future__ import annotations
 
-import asyncio
 from collections.abc import AsyncIterator
 from typing import Any, Literal, TypedDict
-from uuid import uuid4
 
-from ag_ui.core import (
-    BaseEvent,
-    EventType,
-    RunAgentInput,
-    RunErrorEvent,
-    RunFinishedEvent,
-    RunStartedEvent,
-    StateDeltaEvent,
-    StateSnapshotEvent,
-    StepFinishedEvent,
-    StepStartedEvent,
-    TextMessageContentEvent,
-    TextMessageEndEvent,
-    TextMessageStartEvent,
-)
+from ag_ui.core import BaseEvent, EventType, RunAgentInput, RunErrorEvent
 from langgraph.config import get_stream_writer
 from langgraph.func import entrypoint, task
+
+from .langgraph_agui_translator import LangGraphAguiTranslator
 
 
 class Decision(TypedDict):
@@ -116,116 +102,31 @@ def latest_user_text(input_data: RunAgentInput) -> str:
     return "Erkläre mir die LangGraph Functional API"
 
 
-async def pause(delay_ms: int) -> None:
-    await asyncio.sleep(max(delay_ms, 0) / 1000)
-
-
-async def answer_events(text: str, delay_ms: int) -> AsyncIterator[BaseEvent]:
-    message_id = str(uuid4())
-    yield TextMessageStartEvent(
-        type=EventType.TEXT_MESSAGE_START,
-        message_id=message_id,
-        role="assistant",
-    )
-    words = text.split()
-    for index in range(0, len(words), 4):
-        chunk = " ".join(words[index : index + 4])
-        if index + 4 < len(words):
-            chunk += " "
-        await pause(delay_ms)
-        yield TextMessageContentEvent(
-            type=EventType.TEXT_MESSAGE_CONTENT,
-            message_id=message_id,
-            delta=chunk,
-        )
-    yield TextMessageEndEvent(type=EventType.TEXT_MESSAGE_END, message_id=message_id)
-
-
-def runtime_chunk_patch(stream_mode: str, chunk: Any) -> list[dict[str, Any]]:
-    patch = [
-        {
-            "op": "replace",
-            "path": "/lastLangGraphChunk",
-            "value": {"streamMode": stream_mode, "chunk": chunk},
-        }
-    ]
-    mode_path = (
-        "/lastCustomLangGraphChunk" if stream_mode == "custom" else "/lastUpdateLangGraphChunk"
-    )
-    patch.append(
-        {
-            "op": "replace",
-            "path": mode_path,
-            "value": {"streamMode": stream_mode, "chunk": chunk},
-        }
-    )
-    return patch
-
-
 async def run_functional_flow(
     input_data: RunAgentInput, delay_ms: int = 180
 ) -> AsyncIterator[BaseEvent]:
-    """Translate actual Functional API runtime chunks into AG-UI events."""
+    """Translate actual Functional API runtime chunks through the shared translator."""
 
-    yield RunStartedEvent(
-        type=EventType.RUN_STARTED,
-        thread_id=input_data.thread_id,
-        run_id=input_data.run_id,
+    translator = LangGraphAguiTranslator(
+        input_data,
+        api="functional",
+        workflow="functional-tasks-routing",
+        delay_ms=delay_ms,
     )
-    yield StateSnapshotEvent(
-        type=EventType.STATE_SNAPSHOT,
-        snapshot={
-            "framework": "langgraph",
-            "api": "functional",
-            "translation": "runtime-stream-to-ag-ui",
-            "currentTask": "START",
-            "taskOutputs": {},
-            "lastLangGraphChunk": None,
-            "lastCustomLangGraphChunk": None,
-            "lastUpdateLangGraphChunk": None,
-        },
-    )
+    for event in translator.start_events(taskOutputs={}):
+        yield event
 
     try:
         async for stream_mode, runtime_chunk in functional_workflow.astream(
             {"prompt": latest_user_text(input_data)},
             stream_mode=["custom", "updates"],
         ):
-            if stream_mode == "custom" and runtime_chunk.get("phase") == "started":
-                yield StepStartedEvent(
-                    type=EventType.STEP_STARTED,
-                    step_name=runtime_chunk["task"],
-                )
-
-            patch = runtime_chunk_patch(stream_mode, runtime_chunk)
+            yield translator.runtime_chunk_event(stream_mode, runtime_chunk)
             if stream_mode == "custom":
-                task_name = runtime_chunk["task"]
-                patch.append(
-                    {
-                        "op": "replace",
-                        "path": "/currentTask",
-                        "value": task_name,
-                    }
-                )
-                if runtime_chunk.get("phase") == "finished":
-                    patch.append(
-                        {
-                            "op": "add",
-                            "path": f"/taskOutputs/{task_name}",
-                            "value": runtime_chunk.get("output"),
-                        }
-                    )
-            yield StateDeltaEvent(type=EventType.STATE_DELTA, delta=patch)
-
-            if stream_mode == "custom" and runtime_chunk.get("phase") == "finished":
-                if runtime_chunk["task"] == "respond_task":
-                    async for event in answer_events(runtime_chunk["output"], delay_ms):
-                        yield event
-                yield StepFinishedEvent(
-                    type=EventType.STEP_FINISHED,
-                    step_name=runtime_chunk["task"],
-                )
-            await pause(delay_ms)
+                if state_event := translator.functional_task_state_event(runtime_chunk):
+                    yield state_event
+                async for event in translator.translate_custom_signal(runtime_chunk):
+                    yield event
     except Exception as exc:
         yield RunErrorEvent(
             type=EventType.RUN_ERROR,
@@ -234,9 +135,4 @@ async def run_functional_flow(
         )
         return
 
-    yield RunFinishedEvent(
-        type=EventType.RUN_FINISHED,
-        thread_id=input_data.thread_id,
-        run_id=input_data.run_id,
-        outcome={"type": "success"},
-    )
+    yield translator.success_finished()
