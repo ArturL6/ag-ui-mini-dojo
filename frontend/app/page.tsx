@@ -143,7 +143,7 @@ export default function LearningLab() {
         ? `${lesson.endpoint}?delay_ms=${delayMs}`
         : `/api/agent?scenario=${lesson.id}&delay_ms=${delayMs}`,
       agentId: "learning-agent",
-      threadId: `lesson-${lesson.id}`,
+      threadId: `lesson-${lesson.id}-${crypto.randomUUID()}`,
     });
     agent.messages = [
       { id: crypto.randomUUID(), role: "user", content: prompt.trim() },
@@ -266,7 +266,7 @@ export default function LearningLab() {
             {interrupt && (
               <div className="approval" data-testid="approval-card">
                 <small>HUMAN IN THE LOOP</small><h3>Agent wartet auf Freigabe</h3><p>{interrupt.message}</p>
-                <div><button onClick={() => void resumeInterrupt(false)}>Ablehnen</button><button className="approve" onClick={() => void resumeInterrupt(true)} data-testid="approve">Freigeben & fortsetzen</button></div>
+                <div><button onClick={() => void resumeInterrupt(false)} data-testid="reject">Ablehnen</button><button className="approve" onClick={() => void resumeInterrupt(true)} data-testid="approve">Freigeben & fortsetzen</button></div>
               </div>
             )}
             <div className="answer-card">

@@ -127,7 +127,7 @@ Beide Workflows verwenden einen `InMemorySaver`. Der erste Run schlägt das Tool
 Graph/Task → interrupt(payload) → Checkpoint → __interrupt__ update
 ```
 
-Der Translator übernimmt das echte LangGraph-Interruptobjekt einschließlich ID. Für dessen AG-UI-Repräsentation verwendet er `lg_interrupts_to_agui` aus dem offiziellen Paket `ag-ui-langgraph`. Die UI sendet ihre Entscheidung in einem neuen `RunAgentInput.resume[]`; das Backend setzt denselben LangGraph-Thread mit `Command(resume=True|False)` fort.
+Der Translator übernimmt das echte LangGraph-Interruptobjekt einschließlich ID, Payload und Metadaten direkt in die AG-UI-Repräsentation. Die UI sendet ihre Entscheidung in einem neuen `RunAgentInput.resume[]`; das Backend prüft die Interrupt-ID gegen den offenen Checkpoint und setzt denselben LangGraph-Thread mit `Command(resume=True|False)` fort.
 
 Das geschützte Tool liegt hinter der Approval-Kante beziehungsweise hinter der Functional-API-Verzweigung und kann deshalb vor der Freigabe nicht laufen. Der E2E-Test prüft explizit, dass im ersten Run kein `TOOL_CALL_RESULT` existiert und es erst nach Freigabe erscheint.
 

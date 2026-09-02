@@ -67,6 +67,22 @@ async def test_shared_translator_maps_tool_signals_to_ag_ui_protocol():
     ]
     assert finished[0].type == EventType.TOOL_CALL_RESULT
     assert json.loads(finished[0].content) == {"wordCount": 2}
+    assert {event.tool_call_id for event in [*started, *finished]} == {"tool-1"}
+
+
+def test_translator_bounds_raw_runtime_provenance():
+    translator = LangGraphAguiTranslator(
+        input_for(thread_id="bounded-provenance"),
+        api="functional",
+        workflow="translator-test",
+        delay_ms=0,
+    )
+    event = translator.runtime_chunk_event("custom", {"large": "x" * 5_000})
+    chunk = event.delta[0]["value"]["chunk"]
+
+    assert chunk["truncated"] is True
+    assert chunk["originalCharacters"] > 4_000
+    assert len(chunk["preview"]) == 4_000
 
 
 @pytest.mark.parametrize(
@@ -87,6 +103,7 @@ async def test_real_tool_execution_is_a_separate_translated_flow(runner, thread_
     assert EventType.TOOL_CALL_START in event_types
     assert EventType.TOOL_CALL_ARGS in event_types
     assert EventType.TOOL_CALL_END in event_types
+    assert event_types.count(EventType.TOOL_CALL_RESULT) == 1
     assert json.loads(result.content)["wordCount"] == 6
     assert EventType.TEXT_MESSAGE_CONTENT in event_types
     assert event_types[-1] == EventType.RUN_FINISHED
@@ -131,6 +148,7 @@ async def test_real_langgraph_interrupt_resumes_before_tool_execution(runner, th
     result = next(event for event in resumed if event.type == EventType.TOOL_CALL_RESULT)
 
     assert json.loads(result.content)["executed"] is True
+    assert sum(event.type == EventType.TOOL_CALL_RESULT for event in resumed) == 1
     assert resumed[-1].type == EventType.RUN_FINISHED
     assert resumed[-1].outcome.type == "success"
 

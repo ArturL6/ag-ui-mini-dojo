@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Iterable, Mapping
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -24,8 +24,80 @@ from ag_ui.core import (
     ToolCallResultEvent,
     ToolCallStartEvent,
 )
-from ag_ui_langgraph import make_json_safe
-from ag_ui_langgraph.interrupts import lg_interrupts_to_agui
+from ag_ui.core import (
+    Interrupt as AguiInterrupt,
+)
+
+MAX_PROVENANCE_CHARS = 4_000
+
+
+def _json_safe(value: Any, active_ids: set[int]) -> Any:
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if hasattr(value, "model_dump"):
+        return _json_safe(value.model_dump(by_alias=True), active_ids)
+
+    object_id = id(value)
+    if object_id in active_ids:
+        return "<recursive>"
+    active_ids.add(object_id)
+    try:
+        if isinstance(value, Mapping):
+            return {str(key): _json_safe(item, active_ids) for key, item in value.items()}
+        if isinstance(value, (list, tuple, set)):
+            return [_json_safe(item, active_ids) for item in value]
+        if hasattr(value, "value") and hasattr(value, "id"):
+            return {
+                "id": str(value.id),
+                "value": _json_safe(value.value, active_ids),
+                "ns": _json_safe(getattr(value, "ns", None), active_ids),
+                "resumable": getattr(value, "resumable", None),
+                "when": getattr(value, "when", None),
+            }
+        return repr(value)
+    finally:
+        active_ids.remove(object_id)
+
+
+def make_json_safe(value: Any) -> Any:
+    """Return bounded JSON-safe provenance without retaining arbitrary objects."""
+
+    converted = _json_safe(value, set())
+    encoded = json.dumps(converted, ensure_ascii=False, default=repr)
+    if len(encoded) <= MAX_PROVENANCE_CHARS:
+        return converted
+    return {
+        "truncated": True,
+        "originalCharacters": len(encoded),
+        "preview": encoded[:MAX_PROVENANCE_CHARS],
+    }
+
+
+def langgraph_interrupt_to_agui(item: Any) -> AguiInterrupt:
+    raw = item.value
+    mapping = raw if isinstance(raw, Mapping) else {}
+    interrupt_id = getattr(item, "id", None)
+    if not interrupt_id:
+        raise ValueError("LangGraph interrupt has no stable id")
+    reason = mapping.get("reason", "langgraph:interrupt")
+    message = raw if isinstance(raw, str) else mapping.get("message")
+    tool_call_id = mapping.get("toolCallId", mapping.get("tool_call_id"))
+    response_schema = mapping.get("responseSchema", mapping.get("response_schema"))
+    return AguiInterrupt(
+        id=str(interrupt_id),
+        reason=str(reason),
+        message=message,
+        toolCallId=tool_call_id,
+        responseSchema=make_json_safe(response_schema),
+        metadata={
+            "langgraph": {
+                "raw": make_json_safe(raw),
+                "ns": make_json_safe(getattr(item, "ns", None)),
+                "resumable": getattr(item, "resumable", None),
+                "when": getattr(item, "when", None),
+            }
+        },
+    )
 
 
 class LangGraphAguiTranslator:
@@ -212,7 +284,7 @@ class LangGraphAguiTranslator:
             run_id=self.input_data.run_id,
             outcome={
                 "type": "interrupt",
-                "interrupts": lg_interrupts_to_agui(interrupts),
+                "interrupts": [langgraph_interrupt_to_agui(item) for item in interrupts],
             },
         )
 

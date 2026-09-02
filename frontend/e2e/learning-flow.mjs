@@ -37,6 +37,21 @@ async function verifyHitlLesson(id, apiLabel) {
   }
 }
 
+async function verifyHitlRejection(id) {
+  await runLesson(id, "RUN_FINISHED");
+  await page.getByTestId("approval-card").waitFor();
+  await page.getByTestId("reject").click();
+  await page.locator(".run-status.done").waitFor({ timeout: 15_000 });
+  const timeline = await page.getByTestId("event-timeline").innerText();
+  if (timeline.includes("TOOL_CALL_RESULT")) {
+    throw new Error(`${id}: abgelehntes Tool wurde dennoch ausgeführt`);
+  }
+  const answer = await page.getByTestId("answer").innerText();
+  if (!answer.includes("wurde nicht ausgeführt")) {
+    throw new Error(`${id}: Ablehnungsantwort fehlt`);
+  }
+}
+
 try {
   await page.goto(baseUrl, { waitUntil: "networkidle" });
   await runLesson("lifecycle", "RUN_FINISHED");
@@ -94,6 +109,8 @@ try {
   await verifyToolLesson("langgraph-functional-tools");
   await verifyHitlLesson("langgraph-graph-hitl", "Graph-API");
   await verifyHitlLesson("langgraph-functional-hitl", "Functional-API");
+  await verifyHitlRejection("langgraph-graph-hitl");
+  await verifyHitlRejection("langgraph-functional-hitl");
 
   await page.screenshot({ path: "../artifacts/ag-ui-learning-lab.png", fullPage: true });
   console.log(JSON.stringify({ ok: true, lessons: 12, screenshot: "artifacts/ag-ui-learning-lab.png" }));

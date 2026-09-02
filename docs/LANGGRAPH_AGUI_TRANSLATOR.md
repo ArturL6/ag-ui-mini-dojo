@@ -54,7 +54,9 @@ Jeder Runtime-Chunk bleibt zusätzlich in `lastCustomLangGraphChunk` beziehungsw
 
 LangGraph gibt nicht automatisch für jedes beliebige Tool AG-UI-Tool-Events aus. Die Tool-Lektionen führen echte, mit `@tool` dekorierte Tools über `.invoke(...)` aus und instrumentieren den Aufruf innerhalb der laufenden Node beziehungsweise `@task` über `get_stream_writer()`. Der Translator interpretiert diese expliziten Runtime-Signale. Das Tool selbst wird wirklich ausgeführt; bei HITL erst nach erfolgreichem Resume.
 
-Das Paket `ag-ui-langgraph` bietet zusätzlich einen umfangreichen offiziellen Adapter für `CompiledStateGraph`-Agenten. Dieses Lab verwendet daraus die offizielle Interrupt-Konvertierung `lg_interrupts_to_agui`, damit echte Interrupt-IDs und Metadaten korrekt erhalten bleiben. Den gesamten offiziellen Agent-Wrapper verwenden die Lektionen bewusst nicht: Er unterstützt die Graph API, während dieses Lab Graph API und Functional API mit derselben sichtbaren Übersetzungsgrenze vergleichen soll.
+Das Paket `ag-ui-langgraph` bietet zusätzlich einen umfangreichen offiziellen Adapter für `CompiledStateGraph`-Agenten. Dieses Lab verwendet ihn bewusst nicht als Runtime-Abhängigkeit: Er versteckt einen großen Teil des didaktisch relevanten Mappings, bringt zusätzliche LangChain/A2UI-Abhängigkeiten mit und deckt die Functional API nicht über denselben klaren Vertrag ab. Der kleine Lern-Translator übernimmt Interrupt-ID, Payload und LangGraph-Metadaten direkt aus dem echten Interruptobjekt. `ag-ui-langgraph` bleibt eine verlinkte Produktionsreferenz, nicht die hier ausgeführte Übersetzung.
+
+Roh-Chunks werden vor der Übergabe an den Browser JSON-sicher konvertiert und auf 4.000 Zeichen begrenzt. Der Translator ist damit wiederverwendbar für die Dojo-Workflows, aber ausdrücklich kein universeller Ersatz für den offiziellen Adapter.
 
 ## HITL-Lauf
 

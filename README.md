@@ -198,13 +198,13 @@ cd frontend
 npm run test:e2e
 ```
 
-Der E2E-Test führt zwölf keylose Lektionen aus. Für beide LangGraph-APIs beweist er echte Tool-Ausführung sowie: kein `TOOL_CALL_RESULT` vor Freigabe, Interrupt-Anzeige, Resume und Tool-Ergebnis nach Freigabe.
+Der E2E-Test führt zwölf keylose Lektionen aus. Für beide LangGraph-APIs beweist er echte Tool-Ausführung sowie: kein `TOOL_CALL_RESULT` vor Freigabe, Interrupt-Anzeige, Resume, Tool-Ergebnis nach Freigabe und kein Tool-Ergebnis nach Ablehnung.
 
 ## Ist die LangGraph→AG-UI-Übersetzung echt?
 
 Ja, als **echter, zentraler und benutzerdefinierter Runtime-Adapter**: [`LangGraphAguiTranslator`](backend/app/langgraph_agui_translator.py) verarbeitet die Runtime-Ausgaben aller LangGraph-Lektionen. `astream(..., stream_mode=["custom", "updates"])` liefert echte Chunks zur Laufzeit; erst danach ordnet der Translator sie AG-UI-Events zu.
 
-Nicht behauptet wird, dass LangGraph selbst nativ AG-UI-Events ausgibt. Die Orchestrierung, Checkpoints, Interrupt-IDs und Stream-Chunks stammen real aus LangGraph; die semantische Zuordnung zu `STEP_*`, `STATE_*`, `TOOL_CALL_*` und `TEXT_MESSAGE_*` ist Anwendungscode dieses Labs. Für echte Interruptobjekte nutzt der Translator die offizielle Konvertierung aus `ag-ui-langgraph`. Alle Details und Grenzen stehen in [`docs/LANGGRAPH_AGUI_TRANSLATOR.md`](docs/LANGGRAPH_AGUI_TRANSLATOR.md).
+Nicht behauptet wird, dass LangGraph selbst nativ AG-UI-Events ausgibt. Die Orchestrierung, Checkpoints, Interrupt-IDs und Stream-Chunks stammen real aus LangGraph; die semantische Zuordnung zu `STEP_*`, `STATE_*`, `TOOL_CALL_*` und `TEXT_MESSAGE_*` ist Anwendungscode dieses Labs. Der Lern-Translator erhält Interrupt-ID, Payload und Metadaten direkt aus dem echten LangGraph-Objekt, ohne den schwereren offiziellen Gesamtadapter als Runtime-Abhängigkeit einzubauen. Alle Details und Grenzen stehen in [`docs/LANGGRAPH_AGUI_TRANSLATOR.md`](docs/LANGGRAPH_AGUI_TRANSLATOR.md).
 
 ## Was AG-UI hier leistet
 
