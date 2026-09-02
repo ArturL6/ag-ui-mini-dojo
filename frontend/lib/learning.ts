@@ -113,6 +113,26 @@ export const lessons: Lesson[] = [
     endpoint: "/api/langgraph",
     badge: "GRAPH",
   },
+  {
+    id: "langgraph-functional",
+    number: "09",
+    title: "LangGraph Functional API",
+    subtitle: "@entrypoint, @task und normale Python-Kontrolllogik",
+    goal: "Echte Functional-API-Task-Streams empfangen und transparent in AG-UI übersetzen.",
+    prompt: "Erzeuge eine Checkliste mit einem Tool über die Functional API",
+    expectedEvents: [
+      "RUN_STARTED",
+      "STATE_SNAPSHOT",
+      "STEP_STARTED",
+      "STATE_DELTA",
+      "TEXT_MESSAGE_CONTENT",
+      "RUN_FINISHED",
+    ],
+    source: "backend/app/langgraph_functional_flow.py → run_functional_flow()",
+    keyIdea: "Die AG-UI-Events werden aus echten custom/updates-Chunks des Functional-API-Runtimes erzeugt; die Zuordnung selbst ist unser Adapter.",
+    endpoint: "/api/langgraph-functional",
+    badge: "FUNC",
+  },
 ];
 
 export type EventExplanation = {

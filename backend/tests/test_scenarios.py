@@ -6,6 +6,7 @@ import pytest
 from ag_ui.core import EventType, RunAgentInput
 
 from app.langgraph_flow import build_learning_graph, run_langgraph_flow
+from app.langgraph_functional_flow import functional_workflow, run_functional_flow
 from app.main import app
 from app.scenarios import SCENARIOS, run_scenario
 
@@ -106,3 +107,45 @@ def test_langgraph_has_an_endpoint_separate_from_existing_scenarios():
     assert "langgraph" not in SCENARIOS
     assert "/agent" in route_paths
     assert "/agent/langgraph" in route_paths
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected_tasks"),
+    [
+        (
+            "Erzeuge eine Checkliste mit einem Tool",
+            ["understand_task", "learning_tool_task", "respond_task"],
+        ),
+        ("Erkläre mir den Flow direkt", ["understand_task", "respond_task"]),
+    ],
+)
+async def test_functional_api_executes_real_tasks_and_python_control_flow(prompt, expected_tasks):
+    result = await functional_workflow.ainvoke({"prompt": prompt})
+
+    assert result["task_order"] == expected_tasks
+    assert result["answer"]
+
+
+async def test_functional_runtime_chunks_are_translated_to_ag_ui_events():
+    events = await collect(run_functional_flow(input_for(), delay_ms=0))
+    event_types = [event.type for event in events]
+    step_names = [event.step_name for event in events if event.type == EventType.STEP_STARTED]
+    snapshots = [event for event in events if event.type == EventType.STATE_SNAPSHOT]
+    deltas = [event for event in events if event.type == EventType.STATE_DELTA]
+
+    assert event_types[0] == EventType.RUN_STARTED
+    assert snapshots[0].snapshot["translation"] == "runtime-stream-to-ag-ui"
+    assert step_names == ["understand_task", "learning_tool_task", "respond_task"]
+    assert any(
+        operation.get("path") == "/lastLangGraphChunk"
+        and operation["value"]["streamMode"] == "custom"
+        for event in deltas
+        for operation in event.delta
+    )
+    assert EventType.TEXT_MESSAGE_CONTENT in event_types
+    assert event_types[-1] == EventType.RUN_FINISHED
+
+
+def test_functional_api_has_its_own_endpoint():
+    route_paths = {getattr(route, "path", None) for route in app.routes}
+    assert "/agent/langgraph-functional" in route_paths

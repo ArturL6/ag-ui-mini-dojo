@@ -46,8 +46,26 @@ try {
     throw new Error("LangGraph-Antwort fehlt");
   }
 
+  await runLesson("langgraph-functional", "STATE_DELTA");
+  const functionalState = await page.getByTestId("client-state").innerText();
+  for (const evidence of [
+    '"translation": "runtime-stream-to-ag-ui"',
+    '"streamMode": "custom"',
+    '"understand_task"',
+    '"learning_tool_task"',
+    '"respond_task"',
+  ]) {
+    if (!functionalState.includes(evidence)) {
+      throw new Error(`Functional-API-Evidenz fehlt: ${evidence}`);
+    }
+  }
+  const functionalAnswer = await page.getByTestId("answer").innerText();
+  if (!functionalAnswer.includes("Functional API hat den Tool-Pfad gewählt")) {
+    throw new Error("Functional-API-Antwort fehlt");
+  }
+
   await page.screenshot({ path: "../artifacts/ag-ui-learning-lab.png", fullPage: true });
-  console.log(JSON.stringify({ ok: true, lessons: 7, screenshot: "artifacts/ag-ui-learning-lab.png" }));
+  console.log(JSON.stringify({ ok: true, lessons: 8, screenshot: "artifacts/ag-ui-learning-lab.png" }));
 } finally {
   await browser.close();
 }

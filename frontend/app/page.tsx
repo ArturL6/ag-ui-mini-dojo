@@ -55,7 +55,7 @@ export default function LearningLab() {
   const explanation = selected
     ? explainEvent(
         selected.event.type,
-        lesson.id === "langgraph" ? "backend/app/langgraph_flow.py → run_langgraph_flow()" : undefined,
+        lesson.id.startsWith("langgraph") ? lesson.source : undefined,
       )
     : null;
   const seenTypes = new Set(events.map(({ event }) => String(event.type)));
@@ -197,7 +197,7 @@ export default function LearningLab() {
         </nav>
         <div className="stack-card">
           <small>LIVE STACK</small>
-          <span>Next.js 16</span><span>FastAPI</span><span>@ag-ui/client</span><span>LangGraph (Lektion 08)</span><span>Docker Compose</span>
+          <span>Next.js 16</span><span>FastAPI</span><span>@ag-ui/client</span><span>LangGraph Graph + Functional API</span><span>Docker Compose</span>
         </div>
       </aside>
 

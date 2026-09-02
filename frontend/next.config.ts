@@ -8,6 +8,7 @@ const nextConfig: NextConfig = {
     return [
       { source: "/api/agent", destination: `${backend}/agent` },
       { source: "/api/langgraph", destination: `${backend}/agent/langgraph` },
+      { source: "/api/langgraph-functional", destination: `${backend}/agent/langgraph-functional` },
       { source: "/api/health", destination: `${backend}/health` },
     ];
   },

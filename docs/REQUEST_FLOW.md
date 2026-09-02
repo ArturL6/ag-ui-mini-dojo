@@ -43,7 +43,7 @@ Der HTTP-Request ist ein `POST` mit JSON-Body und `Accept`-Header für einen AG-
 
 **Datei:** `frontend/next.config.ts`
 
-Der Browser ruft für die bisherigen Lektionen `/api/agent` auf. Next.js leitet den Request im Docker-Netz an `http://backend:8000/agent` weiter. Lektion 08 verwendet getrennt davon `/api/langgraph` → `http://backend:8000/agent/langgraph`. Dadurch muss der Browser keine internen Docker-Hostnamen kennen und der SSE-Stream bleibt erhalten.
+Der Browser ruft für die bisherigen Lektionen `/api/agent` auf. Next.js leitet den Request im Docker-Netz an `http://backend:8000/agent` weiter. Lektion 08 verwendet getrennt davon `/api/langgraph` → `http://backend:8000/agent/langgraph`; Lektion 09 nutzt `/api/langgraph-functional` → `http://backend:8000/agent/langgraph-functional`. Dadurch muss der Browser keine internen Docker-Hostnamen kennen und der SSE-Stream bleibt erhalten.
 
 ### 4. FastAPI validiert `RunAgentInput`
 
@@ -83,6 +83,29 @@ START → understand ─┬─ tool → learning_tool → respond → END
 ```
 
 `LEARNING_GRAPH.astream(..., stream_mode="updates")` liefert nach jedem Node dessen State-Update. `run_langgraph_flow()` übersetzt diese Updates anschließend in `STEP_*`, `STATE_*` und `TEXT_MESSAGE_*`. LangGraph entscheidet damit den internen Ablauf, während AG-UI ausschließlich die sichtbare Grenze zur Oberfläche bildet.
+
+### 5b. Functional API und überprüfbare Übersetzung in Lektion 09
+
+**Datei:** `backend/app/langgraph_functional_flow.py`
+**Endpunkt:** `POST /agent/langgraph-functional`
+
+`functional_workflow` ist ein echter `@entrypoint`; `understand_task`, `learning_tool_task` und `respond_task` sind echte `@task`-Funktionen. Der Entry Point verwendet normale Python-Kontrolllogik:
+
+```text
+@entrypoint → understand_task → if route == "tool": learning_tool_task → respond_task
+```
+
+Jede Task schreibt über `get_stream_writer()` in den aktiven LangGraph-Runtime-Stream. Der Adapter konsumiert gleichzeitig `custom` und `updates`:
+
+```python
+async for stream_mode, runtime_chunk in functional_workflow.astream(
+    inputs,
+    stream_mode=["custom", "updates"],
+):
+    # runtime_chunk → AG-UI STEP/STATE/TEXT event
+```
+
+Damit ist die Übersetzung real, aber benutzerdefiniert: Die Quell-Chunks kommen aus der tatsächlichen LangGraph-Ausführung; `run_functional_flow()` definiert die fachliche Zuordnung zum AG-UI-Vokabular. `lastCustomLangGraphChunk` und `lastUpdateLangGraphChunk` legen im sichtbaren Client-State beide Stream-Modi samt Rohdaten offen.
 
 ## Rückweg: vom Python-Agenten zur sichtbaren UI
 
@@ -154,6 +177,6 @@ Ein Interrupt hält also nicht unbegrenzt denselben HTTP-Request offen. Er schaf
 - **Datenbank:** Für stateless Lernläufe noch nicht erforderlich.
 - **Redis/Queue:** Die Szenarien sind kurz und laufen im Requestprozess.
 - **Authentifizierung:** Würde vom AG-UI-Protokoll getrennt an Proxy/API ergänzt.
-- **Weitere Framework-Adapter:** LangGraph ist in Lektion 08 exemplarisch vorhanden; ADK oder MAF könnten später dieselbe Eventgrenze bedienen.
+- **Weitere Framework-Adapter:** LangGraph Graph API und Functional API sind exemplarisch vorhanden; ADK oder MAF könnten später dieselbe Eventgrenze bedienen.
 
 Diese Dienste sollten erst ergänzt werden, wenn eine Lektion ihren konkreten Nutzen demonstriert. Docker Compose ist bereits so strukturiert, dass weitere Services ergänzt werden können.
