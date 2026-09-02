@@ -200,7 +200,7 @@ npm run test:e2e
 
 Der E2E-Test führt zwölf keylose Lektionen aus. Für beide LangGraph-APIs beweist er echte Tool-Ausführung sowie: kein `TOOL_CALL_RESULT` vor Freigabe, Interrupt-Anzeige, Resume, Tool-Ergebnis nach Freigabe und kein Tool-Ergebnis nach Ablehnung.
 
-Zusätzliche Backend-Regressionstests decken malformed Resume-Payloads, falsche Interrupt-IDs und parallele doppelte Resume-Requests ab. Die Demo serialisiert HITL pro Workflow/Thread in einem Prozess; für mehrere Worker ist ein persistenter Checkpointer mit atomarem Claim beziehungsweise idempotenter Tool-Ausführung erforderlich.
+Zusätzliche Backend-Regressionstests decken malformed Resume-Payloads, falsche Interrupt-IDs, parallele doppelte Resumes, abgebrochene Lock-Waiter sowie Functional-API-Cancellation mit anschließendem Retry ab. Die Demo kombiniert dafür prozesslokale Workflow-Gates mit einem Singleflight-Register pro Interrupt-ID. Für mehrere Worker ist ein persistenter Checkpointer mit atomarem Claim beziehungsweise idempotenter Tool-Ausführung erforderlich.
 
 ## Ist die LangGraph→AG-UI-Übersetzung echt?
 

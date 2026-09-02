@@ -129,7 +129,7 @@ Graph/Task → interrupt(payload) → Checkpoint → __interrupt__ update
 
 Der Translator übernimmt das echte LangGraph-Interruptobjekt einschließlich ID, Payload und Metadaten direkt in die AG-UI-Repräsentation. Die UI sendet ihre Entscheidung in einem neuen `RunAgentInput.resume[]`; das Backend prüft die Interrupt-ID gegen den offenen Checkpoint und setzt denselben LangGraph-Thread mit `Command(resume=True|False)` fort.
 
-Das geschützte Tool liegt hinter der Approval-Kante beziehungsweise hinter der Functional-API-Verzweigung und kann deshalb vor der Freigabe nicht laufen. Resume akzeptiert nur `status = "resolved"` und ein Objekt mit einem echten booleschen `approved`-Wert. Ein prozesslokales Gate serialisiert denselben Workflow/Thread, sodass zwei gleichzeitige Resume-Requests im Ein-Prozess-Lab nicht beide ausführen können. Der E2E-Test prüft explizit, dass im ersten Run kein `TOOL_CALL_RESULT` existiert und es erst nach Freigabe erscheint.
+Das geschützte Tool liegt hinter der Approval-Kante beziehungsweise hinter der Functional-API-Verzweigung und kann deshalb vor der Freigabe nicht laufen. Resume akzeptiert nur `status = "resolved"` und ein Objekt mit einem echten booleschen `approved`-Wert. Ein prozesslokales Gate serialisiert denselben Workflow/Thread. Zusätzlich bindet ein Singleflight-Register die geschützte Tool-Ausführung an die echte Interrupt-ID. Dadurch bleibt der Aufruf auch dann einmalig, wenn bei der Functional API der HTTP-Consumer abbricht, während die synchrone Tool-Task noch läuft, und danach ein Retry eintrifft. Der E2E-Test prüft explizit, dass im ersten Run kein `TOOL_CALL_RESULT` existiert und es erst nach Freigabe erscheint.
 
 Die vollständige Mapping-Tabelle und die Grenze zwischen nativen Runtime-Daten und Anwendungscode stehen in [`LANGGRAPH_AGUI_TRANSLATOR.md`](LANGGRAPH_AGUI_TRANSLATOR.md).
 
@@ -202,7 +202,7 @@ Lektion 12 und 13 demonstrieren denselben AG-UI-Ablauf mit tatsächlicher LangGr
 
 ## Was in dieser Version bewusst nicht enthalten ist
 
-- **Dauerhafter Checkpointer:** HITL verwendet bewusst `InMemorySaver`; ein Prozessneustart verwirft offene Lern-Interrupts und gespeicherte Checkpoints werden im Demo-Prozess nicht fachlich bereinigt. Mehrere Worker erfordern eine gemeinsame Ablage mit atomarem Resume-Claim oder idempotenter Tool-Ausführung.
+- **Dauerhafter Checkpointer:** HITL verwendet bewusst `InMemorySaver` und ein prozesslokales Singleflight-Register; ein Prozessneustart verwirft offene Lern-Interrupts und Idempotency-Einträge. Beide Speicher werden im Demo-Prozess nicht fachlich bereinigt. Mehrere Worker erfordern eine gemeinsame Ablage mit atomarem Resume-Claim oder idempotenter Tool-Ausführung.
 - **Redis/Queue:** Die Szenarien sind kurz und laufen im Requestprozess.
 - **Authentifizierung:** Würde vom AG-UI-Protokoll getrennt an Proxy/API ergänzt.
 - **Weitere Framework-Adapter:** LangGraph Graph API und Functional API sind exemplarisch vorhanden; ADK oder MAF könnten später dieselbe Eventgrenze bedienen.

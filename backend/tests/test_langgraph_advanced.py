@@ -2,18 +2,24 @@ from __future__ import annotations
 
 import asyncio
 import json
+import threading
 from collections.abc import AsyncIterator
+from contextlib import suppress
 
 import pytest
 from ag_ui.core import EventType, RunAgentInput
 from httpx import ASGITransport, AsyncClient
 
 from app.langgraph_advanced_flows import (
+    PROTECTED_ACTION_LOCK,
+    PROTECTED_ACTION_RECORDS,
     WORKFLOW_GATES,
+    execute_protected_action,
     run_functional_hitl_flow,
     run_functional_tool_flow,
     run_graph_hitl_flow,
     run_graph_tool_flow,
+    serialized_workflow,
 )
 from app.langgraph_agui_translator import LangGraphAguiTranslator
 from app.main import app
@@ -369,6 +375,93 @@ async def test_concurrent_duplicate_resume_executes_protected_tool_once(runner):
 
     assert sum(event.type == EventType.TOOL_CALL_RESULT for event in combined) == 1
     assert sum(event.type == EventType.RUN_ERROR for event in combined) == 1
+    assert not WORKFLOW_GATES
+
+
+async def test_cancelled_gate_waiter_is_removed_after_all_tasks_exit():
+    workflow = "gate-cancellation-test"
+    thread_id = "same-thread"
+    holder_entered = asyncio.Event()
+    release_holder = asyncio.Event()
+
+    async def holder():
+        async with serialized_workflow(workflow, thread_id):
+            holder_entered.set()
+            await release_holder.wait()
+
+    async def waiter():
+        async with serialized_workflow(workflow, thread_id):
+            pass
+
+    holder_task = asyncio.create_task(holder())
+    await holder_entered.wait()
+    waiter_task = asyncio.create_task(waiter())
+    await asyncio.sleep(0)
+    assert WORKFLOW_GATES[(workflow, thread_id)].users == 2
+
+    waiter_task.cancel()
+    with suppress(asyncio.CancelledError):
+        await waiter_task
+    release_holder.set()
+    await holder_task
+
+    assert (workflow, thread_id) not in WORKFLOW_GATES
+
+
+async def test_functional_cancelled_resume_retry_invokes_protected_tool_once(monkeypatch):
+    thread_id = "functional-cancel-retry"
+    initial = await collect(run_functional_hitl_flow(input_for(thread_id=thread_id), delay_ms=0))
+    interrupt_id = initial[-1].outcome.interrupts[0].id
+    record_key = f"functional:{interrupt_id}"
+    with PROTECTED_ACTION_LOCK:
+        PROTECTED_ACTION_RECORDS.pop(record_key, None)
+
+    invocation_started = threading.Event()
+    release_invocation = threading.Event()
+    invocations = 0
+    tool_class = type(execute_protected_action)
+    original_invoke = tool_class.invoke
+
+    def blocking_invoke(self, input, *args, **kwargs):
+        nonlocal invocations
+        if self is execute_protected_action:
+            invocations += 1
+            invocation_started.set()
+            assert release_invocation.wait(timeout=5)
+        return original_invoke(self, input, *args, **kwargs)
+
+    monkeypatch.setattr(tool_class, "invoke", blocking_invoke)
+
+    def resume_request(run_id: str):
+        return run_functional_hitl_flow(
+            input_for(
+                thread_id=thread_id,
+                run_id=run_id,
+                resume=[
+                    {
+                        "interrupt_id": interrupt_id,
+                        "status": "resolved",
+                        "payload": {"approved": True},
+                    }
+                ],
+            ),
+            delay_ms=0,
+        )
+
+    cancelled_consumer = asyncio.create_task(collect(resume_request("cancelled-consumer")))
+    assert await asyncio.to_thread(invocation_started.wait, 5)
+    cancelled_consumer.cancel()
+    with suppress(asyncio.CancelledError):
+        await cancelled_consumer
+
+    retry = asyncio.create_task(collect(resume_request("retry-consumer")))
+    await asyncio.sleep(0.05)
+    release_invocation.set()
+    retry_events = await asyncio.wait_for(retry, timeout=5)
+
+    assert invocations == 1
+    assert sum(event.type == EventType.TOOL_CALL_RESULT for event in retry_events) == 1
+    assert retry_events[-1].outcome.type == "success"
     assert not WORKFLOW_GATES
 
 

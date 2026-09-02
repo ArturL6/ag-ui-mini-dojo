@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+from collections import OrderedDict
 from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -33,14 +35,28 @@ async def serialized_workflow(workflow: str, thread_id: str):
     key = (workflow, thread_id)
     gate = WORKFLOW_GATES.setdefault(key, WorkflowGate())
     gate.users += 1
-    await gate.lock.acquire()
+    acquired = False
     try:
+        await gate.lock.acquire()
+        acquired = True
         yield
     finally:
-        gate.lock.release()
+        if acquired:
+            gate.lock.release()
         gate.users -= 1
-        if gate.users == 0:
+        if gate.users == 0 and WORKFLOW_GATES.get(key) is gate:
             WORKFLOW_GATES.pop(key, None)
+
+
+@dataclass
+class ProtectedActionRecord:
+    done: threading.Event = field(default_factory=threading.Event)
+    result: dict[str, Any] | None = None
+    error: BaseException | None = None
+
+
+PROTECTED_ACTION_LOCK = threading.Lock()
+PROTECTED_ACTION_RECORDS: OrderedDict[str, ProtectedActionRecord] = OrderedDict()
 
 
 class ToolFlowState(TypedDict, total=False):
@@ -54,6 +70,7 @@ class HitlFlowState(TypedDict, total=False):
     prompt: str
     tool_call_id: str
     approved: bool
+    interrupt_id: str
     tool_result: dict[str, Any]
     answer: str
 
@@ -88,6 +105,39 @@ def execute_protected_action(api: str) -> dict[str, Any]:
         "environment": "learning",
         "executed": True,
     }
+
+
+def execute_protected_once(api: str, interrupt_id: str) -> dict[str, Any]:
+    """Singleflight one protected tool invocation for an interrupt in this process."""
+
+    key = f"{api}:{interrupt_id}"
+    with PROTECTED_ACTION_LOCK:
+        record = PROTECTED_ACTION_RECORDS.get(key)
+        owner = record is None
+        if record is None:
+            record = ProtectedActionRecord()
+            PROTECTED_ACTION_RECORDS[key] = record
+
+    if owner:
+        try:
+            result = execute_protected_action.invoke({"api": api})
+        except BaseException as exc:
+            with PROTECTED_ACTION_LOCK:
+                record.error = exc
+                record.done.set()
+            raise
+        else:
+            with PROTECTED_ACTION_LOCK:
+                record.result = result
+                record.done.set()
+    else:
+        record.done.wait()
+
+    if record.error is not None:
+        raise RuntimeError("Die geschützte Tool-Ausführung ist fehlgeschlagen") from record.error
+    if record.result is None:
+        raise RuntimeError("Die geschützte Tool-Ausführung lieferte kein Ergebnis")
+    return record.result
 
 
 def emit(signal: dict[str, Any]) -> None:
@@ -212,7 +262,7 @@ def graph_propose_protected_tool(state: HitlFlowState) -> HitlFlowState:
 
 
 def graph_request_approval(state: HitlFlowState) -> HitlFlowState:
-    approved = interrupt(
+    decision = interrupt(
         {
             "api": "graph",
             "reason": "tool_call",
@@ -225,7 +275,10 @@ def graph_request_approval(state: HitlFlowState) -> HitlFlowState:
             },
         }
     )
-    return {"approved": bool(approved)}
+    return {
+        "approved": decision["approved"],
+        "interrupt_id": decision["interrupt_id"],
+    }
 
 
 def route_graph_approval(state: HitlFlowState) -> str:
@@ -234,7 +287,7 @@ def route_graph_approval(state: HitlFlowState) -> str:
 
 def graph_execute_protected_tool(state: HitlFlowState) -> HitlFlowState:
     emit_step("execute_after_approval", "start")
-    result = execute_protected_action.invoke({"api": "graph"})
+    result = execute_protected_once("graph", state["interrupt_id"])
     emit(
         {
             "kind": "tool_call_result",
@@ -296,28 +349,26 @@ def functional_propose_protected_tool(_prompt: str) -> dict[str, str]:
 
 
 @task
-def functional_approval_task(proposal: dict[str, str]) -> bool:
-    return bool(
-        interrupt(
-            {
-                "api": "functional",
-                "reason": "tool_call",
-                "message": "Soll LangGraph das geschützte Functional-API-Tool ausführen?",
-                "toolCallId": proposal["tool_call_id"],
-                "responseSchema": {
-                    "type": "object",
-                    "properties": {"approved": {"type": "boolean"}},
-                    "required": ["approved"],
-                },
-            }
-        )
+def functional_approval_task(proposal: dict[str, str]) -> dict[str, Any]:
+    return interrupt(
+        {
+            "api": "functional",
+            "reason": "tool_call",
+            "message": "Soll LangGraph das geschützte Functional-API-Tool ausführen?",
+            "toolCallId": proposal["tool_call_id"],
+            "responseSchema": {
+                "type": "object",
+                "properties": {"approved": {"type": "boolean"}},
+                "required": ["approved"],
+            },
+        }
     )
 
 
 @task
-def functional_execute_protected_tool(proposal: dict[str, str]) -> dict[str, Any]:
+def functional_execute_protected_tool(proposal: dict[str, Any]) -> dict[str, Any]:
     emit_step("functional_execute_after_approval", "start")
-    result = execute_protected_action.invoke({"api": "functional"})
+    result = execute_protected_once("functional", proposal["interrupt_id"])
     emit(
         {
             "kind": "tool_call_result",
@@ -332,8 +383,10 @@ def functional_execute_protected_tool(proposal: dict[str, str]) -> dict[str, Any
 @entrypoint(checkpointer=InMemorySaver())
 def functional_hitl_workflow(inputs: dict[str, str]) -> dict[str, Any]:
     proposal = functional_propose_protected_tool(inputs["prompt"]).result()
-    approved = functional_approval_task(proposal).result()
+    decision = functional_approval_task(proposal).result()
+    approved = decision["approved"]
     if approved:
+        proposal["interrupt_id"] = decision["interrupt_id"]
         result = functional_execute_protected_tool(proposal).result()
         answer = "Freigabe erhalten: Das Functional-API-Tool wurde wirklich ausgeführt."
     else:
@@ -370,7 +423,12 @@ async def resume_input(
         raise ValueError(
             f"Interrupt-ID {entry.interrupt_id!r} gehört nicht zum offenen LangGraph-Checkpoint"
         )
-    return Command(resume=entry.payload["approved"])
+    return Command(
+        resume={
+            "approved": entry.payload["approved"],
+            "interrupt_id": entry.interrupt_id,
+        }
+    )
 
 
 async def translated_stream(
